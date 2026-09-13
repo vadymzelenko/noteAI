@@ -136,14 +136,14 @@ html {
   /* Общий масштаб интерфейса. Раньше при системном масштабе браузера 125%
      всё выглядело мелко — подняли базовый размер шрифта, от которого
      считаются почти все rem/em-независимые px-значения ниже. */
-  font-size: 18px;
+  font-size: 19px;
 }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 17px;              /* было 14 → 15 → 17 — увеличен интерфейс */
+  font-size: 18px;              /* было 14 → 15 → 17 → 18 — увеличен интерфейс */
   line-height: 1.5;
   font-feature-settings: 'ss01', 'cv11', 'cv02';
   -webkit-font-smoothing: antialiased;
@@ -212,7 +212,7 @@ svg { display: block; }
   gap: 16px;
 }
 .topbar {
-  width: 100%; max-width: 1120px;
+  width: 100%; max-width: 1200px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 13px 15px 13px 17px;
   background: var(--surface);
@@ -231,11 +231,11 @@ svg { display: block; }
 .topbar-actions { display: flex; gap: 5px; flex-wrap: wrap; }
 
 .content-card {
-  width: 100%; max-width: 1120px;
+  width: 100%; max-width: 1200px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-xl);
-  padding: 32px;
+  padding: 34px;
 }
 
 /* ============================================================
@@ -505,7 +505,7 @@ svg { display: block; }
 .modal-overlay.open { opacity: 1; pointer-events: auto; }
 
 .modal {
-  width: 100%; max-width: 860px;
+  width: 100%; max-width: 900px;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--r-xl);
@@ -620,6 +620,11 @@ svg { display: block; }
 .modal-body input::placeholder { color: var(--muted); }
 
 .toolbar { display: flex; gap: 4px; margin-bottom: 9px; flex-wrap: wrap; align-items: center; }
+.toolbar-sep {
+  width: 1px; align-self: stretch;
+  background: var(--border);
+  margin: 4px 2px;
+}
 .tool {
   width: 36px; height: 36px;
   display: grid; place-items: center;
@@ -632,7 +637,15 @@ svg { display: block; }
 }
 .tool:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .tool .mono { font-family: var(--font-mono); font-size: 12px; }
-.tool.ai-tool { color: var(--accent); border-color: var(--border-strong); }
+.tool.ai-tool {
+  width: auto; padding: 0 12px; gap: 6px;
+  color: var(--accent); border-color: var(--border-strong);
+}
+.ai-tool-label {
+  font-size: 13px; font-weight: 600;
+  font-family: var(--font-sans);
+  display: none;
+}
 
 .modal-body textarea {
   width: 100%; min-height: 190px; resize: vertical;
@@ -671,6 +684,23 @@ svg { display: block; }
   border-radius: var(--r-xs); letter-spacing: 0;
 }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.remember-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  margin-top: 4px;
+  cursor: pointer;
+  font-size: 13.5px; color: var(--text);
+  line-height: 1.5;
+}
+.remember-row input[type="checkbox"] {
+  width: 16px; height: 16px; flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.remember-row span { color: var(--muted); }
 .status {
   font-family: var(--font-mono); font-size: 12px;
   color: var(--muted); margin-top: 10px; letter-spacing: 0;
@@ -953,8 +983,21 @@ svg { display: block; }
     background: var(--surface);
   }
   .modal-foot .btn { flex: 1; justify-content: center; }
+
+  /* Тулбар редактора: на узком экране кнопки разметки не должны
+     теснить друг друга — делаем их компактнее и переносим разделитель
+     с кнопкой ИИ на отдельную полноширинную строку под ними. */
   .toolbar { gap: 6px; }
-  .tool { width: 40px; height: 40px; }
+  .tool { width: 34px; height: 34px; font-size: 13px; }
+  .toolbar-sep { display: none; }
+  .tool.ai-tool {
+    width: 100%; height: 40px;
+    flex-basis: 100%;
+    justify-content: center;
+    margin-top: 2px;
+  }
+  .ai-tool-label { display: inline; }
+
   .checkbox { width: 23px; height: 23px; }
   .quick-add-bar { flex-direction: column; align-items: stretch; }
   .quick-add-bar .btn { width: 100%; justify-content: center; }

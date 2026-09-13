@@ -221,7 +221,10 @@
     setSyncStatus('Загрузка…', 'busy');
     try {
       await DB.purgeExpired();
-      state.items = await DB.allItems();
+      const all = await DB.allItems();
+      // Служебная запись с настройками ИИ (см. ai.js) не должна попадать
+      // в обычные списки/фильтры/метрики — убираем её здесь один раз.
+      state.items = all.filter((x) => x.id !== '__ai_settings__' && x.title !== '__ai_settings__');
       setSyncStatus('Сохранено', 'ok');
     } catch (e) {
       console.error('[load]', e);
@@ -1164,25 +1167,62 @@
     el.className = 'status ' + cls;
   }
 
+  function refreshAiSettingsForm() {
+    const a = AI.config;
+    const providerEl = document.getElementById('aiProvider');
+    if (!providerEl) return; // модалка ещё не забинжена
+    providerEl.value = a.provider || '';
+    document.getElementById('aiKey').value = a.apiKey || '';
+    document.getElementById('aiBaseUrl').value = a.baseUrl || '';
+    document.getElementById('aiModel').value = a.model || '';
+  }
+
   function bindSettings() {
     const overlay = document.getElementById('settingsOverlay');
     const close = () => { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden','true'); };
     document.getElementById('settingsClose').addEventListener('click', close);
     // Закрытие только по крестику — клик по фону больше не закрывает окно.
 
-    document.getElementById('aiSave').addEventListener('click', () => {
+    document.getElementById('aiSave').addEventListener('click', async () => {
       AI.setConfig({
         provider: document.getElementById('aiProvider').value,
         apiKey: document.getElementById('aiKey').value.trim(),
         baseUrl: document.getElementById('aiBaseUrl').value.trim(),
         model: document.getElementById('aiModel').value.trim(),
       });
-      setStatus('aiStatus', AI.config.enabled ? 'Сохранено' : 'ИИ выключен', AI.config.enabled ? 'ok' : '');
+      const remember = document.getElementById('aiRemember');
+      if (remember && remember.checked) {
+        if (!Auth.isSignedIn()) {
+          setStatus('aiStatus', 'Сохранено локально. Чтобы запомнить на аккаунте — сначала войди', 'err');
+          return;
+        }
+        try {
+          await AI.saveToCloud();
+          setStatus('aiStatus', AI.config.enabled ? 'Сохранено на аккаунте' : 'ИИ выключен', AI.config.enabled ? 'ok' : '');
+        } catch (e) {
+          setStatus('aiStatus', 'Сохранено локально, но не на аккаунте: ' + e.message, 'err');
+        }
+      } else {
+        setStatus('aiStatus', AI.config.enabled ? 'Сохранено на этом устройстве' : 'ИИ выключен', AI.config.enabled ? 'ok' : '');
+      }
     });
     document.getElementById('aiTest').addEventListener('click', async () => {
       try { const out = await AI.test(); setStatus('aiStatus', 'Ответ: ' + out, 'ok'); }
       catch (e) { setStatus('aiStatus', e.message, 'err'); }
     });
+    const forgetBtn = document.getElementById('aiForget');
+    if (forgetBtn) {
+      forgetBtn.addEventListener('click', async () => {
+        if (!Auth.isSignedIn()) { setStatus('aiStatus', 'Не авторизован', 'err'); return; }
+        if (!confirm('Удалить сохранённый на аккаунте ключ ИИ?')) return;
+        try {
+          await AI.clearCloud();
+          setStatus('aiStatus', 'Удалено с аккаунта', 'ok');
+        } catch (e) {
+          setStatus('aiStatus', e.message, 'err');
+        }
+      });
+    }
 
     document.getElementById('metricsClose').addEventListener('click', closeMetrics);
     // Закрытие только по крестику — клик по фону больше не закрывает окно.
@@ -1190,11 +1230,12 @@
     document.getElementById('settingsBtn').addEventListener('click', () => {
       overlay.classList.add('open');
       overlay.setAttribute('aria-hidden', 'false');
-      const a = AI.config;
-      document.getElementById('aiProvider').value = a.provider || '';
-      document.getElementById('aiKey').value = a.apiKey || '';
-      document.getElementById('aiBaseUrl').value = a.baseUrl || '';
-      document.getElementById('aiModel').value = a.model || '';
+      refreshAiSettingsForm();
+      const rememberEl = document.getElementById('aiRemember');
+      const rememberRow = document.getElementById('aiRememberRow');
+      if (rememberEl) rememberEl.checked = false;
+      if (rememberRow) rememberRow.style.display = Auth.isSignedIn() ? '' : 'none';
+      setStatus('aiStatus', '', '');
     });
   }
 
@@ -1366,12 +1407,17 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
       updateAccountChip();
       const o = document.getElementById('accountOverlay');
       if (o && o.classList.contains('open')) renderAccountBody();
-      if (Auth.isSignedIn()) loadItems().then(render);
-      else { state.items = []; setSyncStatus('', ''); render(); }
+      if (Auth.isSignedIn()) {
+        loadItems().then(render);
+        AI.loadFromCloud().then((got) => { if (got) refreshAiSettingsForm(); });
+      } else { state.items = []; setSyncStatus('', ''); render(); }
     });
     updateAccountChip();
 
-    if (Auth.isSignedIn()) await loadItems();
+    if (Auth.isSignedIn()) {
+      await loadItems();
+      await AI.loadFromCloud();
+    }
 
     bindEditor();
     bindSettings();

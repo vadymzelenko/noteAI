@@ -1,10 +1,18 @@
 // NodeFlow — обёртка над ИИ-провайдерами.
 // Значения по умолчанию берутся из /config.js (переменные .env),
-// пользователь может переопределить их в UI — они сохраняются в localStorage.
+// пользователь может переопределить их в UI — сохраняются в localStorage
+// и, если пользователь вошёл в аккаунт, дополнительно синхронизируются
+// в Supabase (служебная запись в таблице items), чтобы не вводить ключ
+// заново на каждом устройстве.
 (function () {
     'use strict';
 
     const KEY = 'ai.config';
+    // Фиксированный id служебной записи-контейнера для настроек ИИ.
+    // Она хранится в той же таблице items (без миграций БД), но помечена
+    // самим id и никогда не участвует в обычных списках/фильтрах/метриках —
+    // app.js вылавливает и убирает её из state.items сразу при загрузке.
+    const CLOUD_RECORD_ID = '__ai_settings__';
 
     const config = {
         provider: '',   // 'openai' | 'anthropic' | 'local' | ''
@@ -21,7 +29,7 @@
         if (env.AI_DEFAULT_MODEL)    config.model    = env.AI_DEFAULT_MODEL;
         if (env.AI_DEFAULT_BASE_URL) config.baseUrl  = env.AI_DEFAULT_BASE_URL;
 
-        // 2. Перекрываем пользовательскими настройками
+        // 2. Перекрываем пользовательскими настройками, сохранёнными локально
         try {
             const raw = localStorage.getItem(KEY);
             if (raw) Object.assign(config, JSON.parse(raw));
@@ -34,6 +42,69 @@
         config.enabled = !!config.provider && (!!config.apiKey || config.provider === 'local');
         localStorage.setItem(KEY, JSON.stringify(config));
         return { ...config };
+    }
+
+    // Читает конфиг ИИ, сохранённый в аккаунте (Supabase), если пользователь
+    // вошёл. При успехе перекрывает текущий локальный конфиг облачным —
+    // так один и тот же ключ доступен на любом устройстве после входа.
+    async function loadFromCloud() {
+        if (!window.Auth || !window.Auth.isSignedIn() || !window.DB) return false;
+        try {
+            const sb = window.Auth.client;
+            const userId = window.Auth.user.id;
+            const { data, error } = await sb
+                .from('items')
+                .select('body')
+                .eq('id', CLOUD_RECORD_ID)
+                .eq('user_id', userId)
+                .maybeSingle();
+            if (error || !data || !data.body) return false;
+            const cloudConfig = JSON.parse(data.body);
+            Object.assign(config, cloudConfig);
+            config.enabled = !!config.provider && (!!config.apiKey || config.provider === 'local');
+            localStorage.setItem(KEY, JSON.stringify(config));
+            return true;
+        } catch (e) {
+            console.warn('[ai] не удалось загрузить настройки из аккаунта', e);
+            return false;
+        }
+    }
+
+    // Сохраняет текущий конфиг ИИ (включая ключ) в аккаунт пользователя,
+    // чтобы не вводить его заново на других устройствах.
+    async function saveToCloud() {
+        if (!window.Auth || !window.Auth.isSignedIn()) throw new Error('Нужно войти в аккаунт');
+        const sb = window.Auth.client;
+        const userId = window.Auth.user.id;
+        const now = new Date().toISOString();
+        const row = {
+            id: CLOUD_RECORD_ID,
+            user_id: userId,
+            type: 'note',
+            title: '__ai_settings__',
+            body: JSON.stringify(config),
+            category: '',
+            tags: [],
+            references_ids: [],
+            importance: 'green',
+            deadline: null,
+            done: false,
+            deleted: false,
+            deleted_at: null,
+            font: 'sans',
+            created_at: now,
+            updated_at: now,
+        };
+        const { error } = await sb.from('items').upsert(row, { onConflict: 'id' });
+        if (error) throw error;
+    }
+
+    // Удаляет сохранённый в аккаунте ключ (например, при явном сбросе).
+    async function clearCloud() {
+        if (!window.Auth || !window.Auth.isSignedIn()) return;
+        const sb = window.Auth.client;
+        const userId = window.Auth.user.id;
+        await sb.from('items').delete().eq('id', CLOUD_RECORD_ID).eq('user_id', userId);
     }
 
     function providerEndpoint() {
@@ -220,5 +291,6 @@
         save, load, complete,
         suggestTags, summarize, parseTask, suggestDeadline, test,
         editText, createFromText,
+        loadFromCloud, saveToCloud, clearCloud,
     };
 })();
