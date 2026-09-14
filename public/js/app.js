@@ -202,7 +202,7 @@
     const q = state.filter.query.trim().toLowerCase();
     return items.filter((it) => {
       if (it.type !== type) return false;
-      if (deleted(it)) return false;
+      if (hidden(it)) return false;
       if (type === 'task' && state.filter.importance !== 'all' && it.importance !== state.filter.importance) return false;
       if (state.filter.category !== 'all' && (it.category || '') !== state.filter.category) return false;
       if (q) {
@@ -227,6 +227,7 @@
     setSyncStatus('Загрузка…', 'busy');
     try {
       await DB.purgeExpired();
+      await DB.purgeExpiredDrafts();
       const all = await DB.allItems();
       // Служебная запись с настройками ИИ (см. ai.js) не должна попадать
       // в обычные списки/фильтры/метрики — убираем её здесь один раз.
@@ -364,7 +365,7 @@
 
   function allCategories(type) {
     const set = new Set();
-    state.items.forEach((it) => { if (it.type === type && it.category && !deleted(it)) set.add(it.category); });
+    state.items.forEach((it) => { if (it.type === type && it.category && !hidden(it)) set.add(it.category); });
     return [...set].sort();
   }
 
@@ -450,7 +451,7 @@
   }
 
   function renderTasksView() {
-    const activeTasks = state.items.filter((x) => x.type === 'task' && !deleted(x));
+    const activeTasks = state.items.filter((x) => x.type === 'task' && !hidden(x));
     const filteredActive = applyFilter(state.items, 'task').filter((x) => !x.done);
     const filteredDone = applyFilter(state.items, 'task').filter((x) => x.done);
     const sortedActive = sortTasks(filteredActive);
@@ -459,6 +460,7 @@
     const done = activeTasks.filter((x) => x.done).length;
     const active = total - done;
     const trashCount = state.items.filter(deleted).length;
+    const draftsCount = state.items.filter(draft).filter((x) => !deleted(x)).length;
 
     const completedSection = sortedDone.length ? `
       <div class="section-title">Выполнено · ${sortedDone.length}</div>
@@ -480,6 +482,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg>
             Аналитика
           </button>
+          <button class="btn ghost sm" id="draftsBtn">Черновики${draftsCount ? ' · ' + draftsCount : ''}</button>
           <button class="btn ghost sm" id="trashBtn">Корзина${trashCount ? ' · ' + trashCount : ''}</button>
           <button class="btn primary" id="addBtn">+ Добавить</button>
         </div>
@@ -497,9 +500,10 @@
   }
 
   function renderNotesView() {
-    const all = state.items.filter((x) => x.type === 'note' && !deleted(x));
+    const all = state.items.filter((x) => x.type === 'note' && !hidden(x));
     const sorted = sortNotes(applyFilter(state.items, 'note'));
     const trashCount = state.items.filter(deleted).length;
+    const draftsCount = state.items.filter(draft).filter((x) => !deleted(x)).length;
 
     return `
       <div class="view-head">
@@ -516,6 +520,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg>
             Аналитика
           </button>
+          <button class="btn ghost sm" id="draftsBtn">Черновики${draftsCount ? ' · ' + draftsCount : ''}</button>
           <button class="btn ghost sm" id="trashBtn">Корзина${trashCount ? ' · ' + trashCount : ''}</button>
           <button class="btn primary" id="addBtn">+ Добавить</button>
         </div>
@@ -538,6 +543,9 @@
 
     const trashBtn = document.getElementById('trashBtn');
     if (trashBtn) trashBtn.addEventListener('click', openTrash);
+
+    const draftsBtn = document.getElementById('draftsBtn');
+    if (draftsBtn) draftsBtn.addEventListener('click', openDrafts);
 
     const quickAddBtn = document.getElementById('quickAddBtn');
     const quickAddInput = document.getElementById('quickAddInput');
@@ -660,8 +668,8 @@
 
   function renderMetrics() {
     const body = document.getElementById('metricsBody');
-    const tasks = state.items.filter((x) => x.type === 'task' && !deleted(x));
-    const notes = state.items.filter((x) => x.type === 'note' && !deleted(x));
+    const tasks = state.items.filter((x) => x.type === 'task' && !hidden(x));
+    const notes = state.items.filter((x) => x.type === 'note' && !hidden(x));
     const total = tasks.length;
     const done = tasks.filter((x) => x.done).length;
     const active = total - done;
@@ -875,13 +883,13 @@
   function renderCategoryDatalist() {
     const dl = document.getElementById('categoryList');
     const cats = new Set();
-    state.items.forEach((it) => { if (it.category && !deleted(it)) cats.add(it.category); });
+    state.items.forEach((it) => { if (it.category && !hidden(it)) cats.add(it.category); });
     dl.innerHTML = [...cats].map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
   }
 
   function renderRefPicker() {
     const others = state.items
-        .filter((x) => x.id !== state.editingId && !deleted(x))
+        .filter((x) => x.id !== state.editingId && !hidden(x))
         .sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0))
         .slice(0, 40);
     if (!others.length) {
@@ -1025,7 +1033,7 @@
   // id не могут породить дубликат, а лок нужен только чтобы не долбить сеть.
   let saveLock = false;
 
-  async function persistFromEditor() {
+  async function persistFromEditor(isAutosave) {
     if (saveLock) return;
     const title = editor.titleEl.value.trim();
     const body = editor.bodyEl.value;
@@ -1036,9 +1044,16 @@
       const existing = state.items.find((x) => x.id === state.editingId);
       const item = existing ? { ...existing } : {
         id: state.editingId, type: state.editingType, done: false,
-        createdAt: Date.now(), deleted: false,
+        createdAt: Date.now(), deleted: false, draft: true,
       };
       readEditorInto(item);
+      // Автосейв (пока пользователь печатает и ещё не нажал «Сохранить»)
+      // помечает запись как черновик — она не попадает в обычные списки/
+      // фильтры/аналитику (см. hidden()) и видна только в модалке
+      // «Черновики». Явное «Сохранить» ниже (isAutosave=false) всегда
+      // снимает флаг draft и делает запись обычной — это единственное
+      // место, где черновик становится настоящей задачей/заметкой.
+      item.draft = isAutosave ? (item.draft !== false) : false;
       await persist(item);
     } finally {
       saveLock = false;
@@ -1047,7 +1062,7 @@
 
   function scheduleAutosave() {
     clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(persistFromEditor, 1500);
+    autosaveTimer = setTimeout(() => persistFromEditor(true), 1500);
   }
 
   async function saveEditor() {
@@ -1062,7 +1077,7 @@
       const title = editor.titleEl.value.trim();
       const body = editor.bodyEl.value;
       if (!title && !body) { closeEditor(); return; }
-      await persistFromEditor();
+      await persistFromEditor(false);
       closeEditor();
       render();
     } finally {
@@ -1195,6 +1210,76 @@
     });
   }
 
+  /* ====================== ЧЕРНОВИКИ ====================== */
+  // Черновики — записи, автосохранённые во время печати, но ни разу не
+  // подтверждённые явным нажатием «Сохранить» (см. persistFromEditor).
+  // Они скрыты из обычных списков/фильтров/аналитики (см. hidden()) и
+  // живут здесь, пока пользователь не откроет и не сохранит их явно,
+  // либо не удалит — иначе через 14 дней с момента создания они
+  // автоматически стираются (см. DB.purgeExpiredDrafts()).
+
+  function openDrafts() {
+    const o = document.getElementById('draftsOverlay');
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+    renderDraftsList();
+  }
+  function closeDrafts() {
+    const o = document.getElementById('draftsOverlay');
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+  }
+  function renderDraftsList() {
+    const list = document.getElementById('draftsList');
+    const items = state.items
+        .filter((x) => draft(x) && !deleted(x))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    if (!items.length) { list.innerHTML = '<div class="empty-state">Черновиков нет</div>'; return; }
+    list.innerHTML = items.map((it) => {
+      const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.createdAt || 0))) / 86400000));
+      return `
+        <div class="item-row">
+          <div class="item-body">
+            <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
+            <div class="item-meta">
+              <span class="mini-tag muted">${it.type === 'task' ? 'Задача' : 'Заметка'}</span>
+              <span class="mini-tag muted">удалится через ${days} дн.</span>
+            </div>
+          </div>
+          <div class="view-actions">
+            <button class="btn sm" data-open-draft="${it.id}">Открыть</button>
+            <button class="btn sm ghost" data-delete-draft="${it.id}">Удалить</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('[data-open-draft]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const it = state.items.find((x) => x.id === b.dataset.openDraft);
+        if (!it) return;
+        closeDrafts();
+        openEditor(it, it.type);
+      });
+    });
+    list.querySelectorAll('[data-delete-draft]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        if (!confirm('Удалить черновик безвозвратно?')) return;
+        await purgeItem(b.dataset.deleteDraft);
+        renderDraftsList(); render();
+      });
+    });
+  }
+  function bindDrafts() {
+    document.getElementById('draftsClose').addEventListener('click', closeDrafts);
+    // Закрытие только по крестику — клик по фону больше не закрывает окно.
+    document.getElementById('draftsEmptyBtn').addEventListener('click', async () => {
+      if (!confirm('Удалить все черновики безвозвратно?')) return;
+      const all = state.items.filter((x) => draft(x) && !deleted(x));
+      for (const it of all) await purgeItem(it.id);
+      renderDraftsList(); render();
+    });
+  }
+
   /* ====================== НАСТРОЙКИ / АККАУНТ ====================== */
 
   function setStatus(id, text, cls = '') {
@@ -1273,58 +1358,58 @@
       if (rememberEl) rememberEl.checked = false;
       if (rememberRow) rememberRow.hidden = !Auth.isSignedIn();
       setStatus('aiStatus', '', '');
-      refreshSmsSettingsForm();
-      setStatus('smsStatus', '', '');
+      refreshEmailSettingsForm();
+      setStatus('emailStatus', '', '');
     });
 
-    bindSmsSettings();
+    bindEmailSettings();
   }
 
-  function refreshSmsSettingsForm() {
-    const phoneEl = document.getElementById('smsPhone');
-    const enabledEl = document.getElementById('smsEnabled');
-    if (!phoneEl || !window.SMS) return;
-    phoneEl.value = SMS.getPhone();
-    enabledEl.checked = SMS.isEnabled();
+  function refreshEmailSettingsForm() {
+    const recipientEl = document.getElementById('emailRecipient');
+    const enabledEl = document.getElementById('emailEnabled');
+    if (!recipientEl || !window.Email) return;
+    recipientEl.value = Email.getRecipient();
+    enabledEl.checked = Email.isEnabled();
   }
 
-  function bindSmsSettings() {
-    const saveBtn = document.getElementById('smsSave');
-    const testBtn = document.getElementById('smsTest');
-    if (!saveBtn || !window.SMS) return;
+  function bindEmailSettings() {
+    const saveBtn = document.getElementById('emailSave');
+    const testBtn = document.getElementById('emailTest');
+    if (!saveBtn || !window.Email) return;
 
     saveBtn.addEventListener('click', () => {
-      const phone = document.getElementById('smsPhone').value.trim();
-      const enabled = document.getElementById('smsEnabled').checked;
-      if (enabled && !/^\+?[0-9]{7,15}$/.test(phone)) {
-        setStatus('smsStatus', 'Укажи номер в формате +79991234567', 'err');
+      const recipient = document.getElementById('emailRecipient').value.trim();
+      const enabled = document.getElementById('emailEnabled').checked;
+      if (enabled && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+        setStatus('emailStatus', 'Укажи корректный email-адрес', 'err');
         return;
       }
-      SMS.setPhone(phone);
-      SMS.setEnabled(enabled);
-      setStatus('smsStatus', enabled ? 'SMS-напоминания включены' : 'SMS-напоминания выключены', enabled ? 'ok' : '');
+      Email.setRecipient(recipient);
+      Email.setEnabled(enabled);
+      setStatus('emailStatus', enabled ? 'Email-напоминания включены' : 'Email-напоминания выключены', enabled ? 'ok' : '');
     });
 
     testBtn.addEventListener('click', async () => {
       testBtn.disabled = true;
       try {
-        await SMS.testSms();
-        setStatus('smsStatus', 'Тестовое SMS отправлено', 'ok');
+        await Email.testEmail();
+        setStatus('emailStatus', 'Тестовое письмо отправлено', 'ok');
       } catch (e) {
-        setStatus('smsStatus', e.message, 'err');
+        setStatus('emailStatus', e.message, 'err');
       } finally {
         testBtn.disabled = false;
       }
     });
   }
 
-  /* ====================== ПРОВЕРКА ДЕДЛАЙНОВ ДЛЯ SMS ====================== */
+  /* ====================== ПРОВЕРКА ДЕДЛАЙНОВ ДЛЯ EMAIL ====================== */
 
   let deadlineWatcherTimer = null;
   function startDeadlineWatcher() {
     clearInterval(deadlineWatcherTimer);
-    if (!window.SMS) return;
-    const tick = () => { if (Auth.isSignedIn()) SMS.checkDeadlines(state.items).catch(() => {}); };
+    if (!window.Email) return;
+    const tick = () => { if (Auth.isSignedIn()) Email.checkDeadlines(state.items).catch(() => {}); };
     tick();
     deadlineWatcherTimer = setInterval(tick, 5 * 60 * 1000); // раз в 5 минут, пока вкладка открыта
   }
@@ -1512,6 +1597,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     bindEditor();
     bindSettings();
     bindTrash();
+    bindDrafts();
     bindHotkeys();
     bindAccount();
 

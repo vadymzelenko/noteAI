@@ -133,25 +133,33 @@
 html, body { height: 100%; }
 
 html {
-  /* Общий масштаб интерфейса. Раньше при системном масштабе браузера 125%
-     всё выглядело мелко — подняли базовый размер шрифта, от которого
-     считаются почти все rem/em-независимые px-значения ниже. */
-  font-size: 19px;
+  /* Раньше здесь стояло 19px «для масштаба» — но в файле почти нигде не
+     используются rem/em, так что это значение ни на что не влияло и только
+     путало. Оставляем стандартные 16px и отключаем автоувеличение текста
+     мобильными браузерами при повороте экрана. */
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 18px;              /* было 14 → 15 → 17 → 18 — увеличен интерфейс */
-  line-height: 1.5;
+  font-size: 18px;
+  line-height: 1.6;              /* было 1.5 — чуть просторнее для читаемости */
   font-feature-settings: 'ss01', 'cv11', 'cv02';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  letter-spacing: var(--track-tight);
+  /* Было -0.02em по умолчанию для ВСЕГО текста, включая абзацы заметок —
+     плотный трекинг уместен в заголовках (там он задан явно отдельными
+     классами), но ухудшает читаемость обычного текста. Обычный текст
+     теперь идёт с нормальным трекингом. */
+  letter-spacing: normal;
   transition: background .25s var(--ease), color .2s var(--ease);
   overscroll-behavior: none;
+  overflow-x: hidden;
 }
 
 button { font-family: inherit; color: inherit; cursor: pointer; letter-spacing: inherit; }
@@ -215,8 +223,9 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
    ============================================================ */
 .app {
   min-height: 100vh;
+  min-height: 100dvh; /* dvh учитывает появление/скрытие адресной строки браузера на мобильном — без этого высота "прыгала" */
   display: flex; flex-direction: column; align-items: center;
-  padding: 26px 20px 100px;
+  padding: max(26px, env(safe-area-inset-top)) 20px 100px;
   gap: 16px;
 }
 .topbar {
@@ -344,7 +353,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 .search-box svg { color: var(--muted); flex-shrink: 0; }
 .search-box input {
   flex: 1; border: none; outline: none; background: transparent;
-  font-size: 13.5px; min-width: 0;
+  font-size: 16px; min-width: 0;
 }
 .search-box input::placeholder { color: var(--muted); }
 
@@ -522,7 +531,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
           0 12px 32px -8px rgba(0,0,0,.25),
           0 24px 60px -16px rgba(0,0,0,.2);
   display: flex; flex-direction: column;
-  max-height: 88vh; overflow: hidden;
+  max-height: 88vh; max-height: 88dvh; overflow: hidden;
   transform: translateY(6px) scale(.995);
   transition: transform .18s var(--ease-out);
 }
@@ -601,6 +610,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 .field select,
 .modal-body input[type="text"],
 .modal-body input[type="password"],
+.modal-body input[type="email"],
 .modal-body input[type="datetime-local"],
 .modal-body select {
   width: 100%;
@@ -609,7 +619,10 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   border-radius: var(--r-sm);
   background: var(--surface-2);
   color: var(--text);
-  font-size: 15px;
+  /* 16px минимум — иначе iOS Safari при фокусе на поле с меньшим шрифтом
+     автоматически зумит всю страницу, и это выглядит как «сломанная»
+     мобильная вёрстка. */
+  font-size: 16px;
   outline: none;
   transition: border-color .12s var(--ease), background .12s var(--ease);
 }
@@ -663,7 +676,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   background: var(--surface-2);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 14px; line-height: 1.6;
+  font-size: 16px; line-height: 1.6;
   letter-spacing: 0;
   outline: none;
   transition: border-color .12s var(--ease), background .12s var(--ease);
@@ -952,23 +965,44 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 
 /* ---------- Адаптив ---------- */
 @media (max-width: 720px) {
-  html { font-size: 17px; }
-  .app { padding: 12px 10px 100px; gap: 12px; }
+  .app { padding: max(12px, env(safe-area-inset-top)) 10px 100px; gap: 12px; }
   .content-card { padding: 16px; border-radius: var(--r-lg); }
   .brand-name { display: none; }
+  .topbar { padding: 10px 10px 10px 12px; gap: 6px; }
+  .topbar-actions { gap: 4px; }
   .topbar-actions .btn span:not(#themeLabel):not(#modeLabel) { display: none; }
   .topbar-actions .btn { padding: 8px 10px; }
   .topbar-actions .btn.icon-btn { padding: 8px; }
   .view-head { margin-bottom: 16px; }
   .view-title { font-size: 21px; }
-  .view-actions { width: 100%; }
-  .view-actions .btn { flex: 1; justify-content: center; }
+
+  /* Раньше все кнопки хедера (Фильтры/Аналитика/Черновики/Корзина/+Добавить)
+     стояли в один нерастягиваемый ряд с flex:1 каждая — на экране ~360px
+     это давало 4 кнопки по ~60px шириной с обрезанным текстом. Теперь они
+     переносятся по 2 в ряд, а «+Добавить» — отдельной полноширинной строкой. */
+  .view-actions { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
+  .view-actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; padding: 10px 10px; white-space: nowrap; }
   .view-actions .btn#addBtn { order: -1; flex-basis: 100%; }
+
   .form-grid { grid-template-columns: 1fr; }
   .field.span-2, .field-refs { grid-column: span 1; }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
   .metrics-two-col { grid-template-columns: 1fr; }
   .donut-wrap { flex-direction: column; align-items: flex-start; }
+  .donut-svg { max-width: 100%; height: auto; }
+
+  /* Панель фильтров: раньше search-box держал min-width:220px и вместе
+     с чипами/селектом не помещался в ширину экрана — переносим всё
+     в колонку и растягиваем на полную ширину. */
+  .filters-inner { flex-direction: column; align-items: stretch; gap: 8px; }
+  .search-box { min-width: 0; width: 100%; }
+  .select-sm { width: 100%; }
+
+  /* Списки записей — компактнее на маленьком экране */
+  .item-row { padding: 12px 14px; gap: 10px; }
+  .item-title { font-size: 15.5px; }
+  .item-desc { font-size: 13.5px; }
+  .cat-row { grid-template-columns: minmax(56px, 96px) 1fr 30px; gap: 8px; font-size: 12px; }
 
   /* Модалки на мобильном — полноэкранные снизу вверх, без промежутков,
      чтобы было удобно листать пальцем и не мазать по маленьким полям. */
@@ -978,7 +1012,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   }
   .modal {
     max-width: 100%;
-    max-height: 100vh;
+    max-height: 100vh; max-height: 100dvh;
     height: 100%;
     border-radius: 0;
     border-left: none; border-right: none; border-bottom: none;
@@ -990,13 +1024,13 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
     position: sticky; bottom: 0;
     background: var(--surface);
   }
-  .modal-foot .btn { flex: 1; justify-content: center; }
+  .modal-foot .btn { flex: 1; justify-content: center; padding: 12px 14px; }
+  .field-title { font-size: 20px; }
 
   /* Тулбар редактора: на узком экране кнопки разметки не должны
      теснить друг друга — делаем их компактнее и переносим разделитель
      с кнопкой ИИ на отдельную полноширинную строку под ними. */
   .toolbar { gap: 6px; }
-  .tool { width: 34px; height: 34px; font-size: 13px; }
   .toolbar-sep { display: none; }
   .tool.ai-tool {
     width: 100%; height: 40px;
@@ -1006,6 +1040,13 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   }
   .ai-tool-label { display: inline; }
 
+  .ai-quick-actions { gap: 8px; }
+  .ai-quick-btn { padding: 9px 12px; font-size: 13.5px; }
+  .ai-prompt-row { flex-direction: column; align-items: stretch; }
+  .ai-prompt-row #aiPromptSend { justify-content: center; padding: 12px; }
+
+  .row-actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
+
   /* Touch-таргеты: на мобильном подтягиваем интерактивные элементы к
      рекомендуемому минимуму ~44px, чтобы не промахиваться пальцем. */
   .checkbox { width: 26px; height: 26px; }
@@ -1014,8 +1055,22 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   .item-row.clickable { min-height: 44px; }
   .chip { min-height: 36px; padding: 7px 12px; }
 
-  .quick-add-bar { flex-direction: column; align-items: stretch; }
-  .quick-add-bar .btn { width: 100%; justify-content: center; }
+  .quick-add-bar { flex-direction: column; align-items: stretch; padding: 10px 12px; }
+  .quick-add-bar .btn { width: 100%; justify-content: center; padding: 12px; }
+
+  /* Попап эмодзи не должен упираться в край экрана на узких телефонах. */
+  .popover { max-width: calc(100vw - 24px); }
+}
+
+/* ---------- Совсем маленькие экраны (iPhone SE и т.п.) ---------- */
+@media (max-width: 380px) {
+  .app { padding-left: 8px; padding-right: 8px; }
+  .content-card { padding: 12px; }
+  .view-title { font-size: 19px; }
+  .brand-mark { width: 30px; height: 30px; }
+  .topbar-actions .btn#accountBtn span { display: none; }
+  .view-actions .btn { flex-basis: 100%; }
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
 }
 
 /* ============================================================
@@ -1063,7 +1118,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   border-radius: var(--r-sm);
   background: var(--surface);
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   transition: border-color .12s var(--ease);
 }
@@ -1108,7 +1163,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 .quick-add-bar input {
   flex: 1; min-width: 0;
   border: none; outline: none; background: transparent;
-  font-size: 14.5px; color: var(--text);
+  font-size: 16px; color: var(--text);
 }
 .quick-add-bar input::placeholder { color: var(--muted); }
 .quick-add-bar .btn { flex-shrink: 0; }
