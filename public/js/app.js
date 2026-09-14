@@ -181,6 +181,12 @@
   /* ====================== ФИЛЬТР / СОРТ ====================== */
 
   const deleted = (it) => !!it.deleted;
+  const draft = (it) => !!it.draft;
+  // Черновики (не сохранённые явно кнопкой «Сохранить») и удалённые записи
+  // ведут себя одинаково с точки зрения обычных списков/поиска/аналитики —
+  // они скрыты отовсюду и всплывают только в своих отдельных модалках
+  // («Черновики» / «Корзина»).
+  const hidden = (it) => deleted(it) || draft(it);
 
   function sortTasks(items) {
     return [...items].sort((a, b) => {
@@ -599,13 +605,17 @@
     scope.querySelectorAll('.checkbox[data-toggle]').forEach((el) => {
       if (el.dataset.bound) return;
       el.dataset.bound = '1';
-      el.addEventListener('click', async (e) => {
+      el.addEventListener('click', (e) => {
         e.stopPropagation();
         const it = state.items.find((x) => x.id === el.dataset.toggle);
         if (!it) return;
         it.done = !it.done;
-        await persist(it);
+        // Оптимистичный UI: перерисовываем сразу, не дожидаясь ответа сети —
+        // раньше ждали `await persist()` ДО render(), из-за чего галочка
+        // «зависала» до ответа сервера. Само сохранение идёт в фоне;
+        // при ошибке persist() уже показывает статус через setSyncStatus.
         render();
+        persist(it).catch((err) => console.error('[toggle]', err));
       });
     });
     scope.querySelectorAll('.item-row[data-id]').forEach((el) => {
@@ -813,7 +823,14 @@
   let aiBusy = false;
 
   function openEditor(item, type) {
-    state.editingId = item ? item.id : null;
+    // Раньше для новой записи editingId оставался null до самого "Сохранить".
+    // Из-за этого двойной клик/тап по кнопке (или клик, пока предыдущий
+    // persist() ещё летит по сети) создавал ДВЕ разные записи с разными id —
+    // это и есть баг «дублирующиеся заметки». Теперь id генерируется сразу
+    // при открытии редактора и остаётся неизменным до закрытия: и автосейв,
+    // и ручное сохранение всегда делают upsert по одному и тому же id,
+    // так что повторный вызов просто перезапишет ту же запись, а не создаст новую.
+    state.editingId = item ? item.id : uid();
     state.editingType = item ? item.type : type;
 
     editor.overlay.classList.add('open');
@@ -1001,36 +1018,56 @@
     return item;
   }
 
+  // saveLock защищает от «гонки состояний»: пока идёт upsert в БД, повторный
+  // вызов (автосейв сработал одновременно с ручным «Сохранить», либо два
+  // быстрых клика/тапа) просто выходит, ничего не создавая — id записи один
+  // и тот же (см. openEditor), поэтому даже параллельные upsert-ы по одному
+  // id не могут породить дубликат, а лок нужен только чтобы не долбить сеть.
+  let saveLock = false;
+
+  async function persistFromEditor() {
+    if (saveLock) return;
+    const title = editor.titleEl.value.trim();
+    const body = editor.bodyEl.value;
+    if (!title && !body) return; // пустой черновик не сохраняем
+
+    saveLock = true;
+    try {
+      const existing = state.items.find((x) => x.id === state.editingId);
+      const item = existing ? { ...existing } : {
+        id: state.editingId, type: state.editingType, done: false,
+        createdAt: Date.now(), deleted: false,
+      };
+      readEditorInto(item);
+      await persist(item);
+    } finally {
+      saveLock = false;
+    }
+  }
+
   function scheduleAutosave() {
-    if (!state.editingId) return; // новые записи сохраняются только кнопкой
     clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(async () => {
-      const it = state.items.find((x) => x.id === state.editingId);
-      if (!it) return;
-      const title = editor.titleEl.value.trim();
-      const body = editor.bodyEl.value;
-      if (!title && !body) return;
-      readEditorInto(it);
-      await persist(it);
-    }, 1500);
+    autosaveTimer = setTimeout(persistFromEditor, 1500);
   }
 
   async function saveEditor() {
     clearTimeout(autosaveTimer);
-    const title = editor.titleEl.value.trim();
-    const body = editor.bodyEl.value;
-    if (!title && !body) { closeEditor(); return; }
-
-    const existing = state.editingId ? state.items.find((x) => x.id === state.editingId) : null;
-    const now = Date.now();
-    const item = existing ? { ...existing } : {
-      id: uid(), type: state.editingType, done: false,
-      createdAt: now, deleted: false,
-    };
-    readEditorInto(item);
-    await persist(item);
-    closeEditor();
-    render();
+    const saveBtn = document.getElementById('editorSave');
+    // Кнопка блокируется немедленно и синхронно — до первого await — чтобы
+    // второй клик/тап, случившийся, пока сеть ещё не ответила, был просто
+    // проигнорирован, а не запустил параллельное сохранение.
+    if (saveBtn && saveBtn.disabled) return;
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      const title = editor.titleEl.value.trim();
+      const body = editor.bodyEl.value;
+      if (!title && !body) { closeEditor(); return; }
+      await persistFromEditor();
+      closeEditor();
+      render();
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
   }
 
   async function deleteFromEditor() {
@@ -1234,9 +1271,62 @@
       const rememberEl = document.getElementById('aiRemember');
       const rememberRow = document.getElementById('aiRememberRow');
       if (rememberEl) rememberEl.checked = false;
-      if (rememberRow) rememberRow.style.display = Auth.isSignedIn() ? '' : 'none';
+      if (rememberRow) rememberRow.hidden = !Auth.isSignedIn();
       setStatus('aiStatus', '', '');
+      refreshSmsSettingsForm();
+      setStatus('smsStatus', '', '');
     });
+
+    bindSmsSettings();
+  }
+
+  function refreshSmsSettingsForm() {
+    const phoneEl = document.getElementById('smsPhone');
+    const enabledEl = document.getElementById('smsEnabled');
+    if (!phoneEl || !window.SMS) return;
+    phoneEl.value = SMS.getPhone();
+    enabledEl.checked = SMS.isEnabled();
+  }
+
+  function bindSmsSettings() {
+    const saveBtn = document.getElementById('smsSave');
+    const testBtn = document.getElementById('smsTest');
+    if (!saveBtn || !window.SMS) return;
+
+    saveBtn.addEventListener('click', () => {
+      const phone = document.getElementById('smsPhone').value.trim();
+      const enabled = document.getElementById('smsEnabled').checked;
+      if (enabled && !/^\+?[0-9]{7,15}$/.test(phone)) {
+        setStatus('smsStatus', 'Укажи номер в формате +79991234567', 'err');
+        return;
+      }
+      SMS.setPhone(phone);
+      SMS.setEnabled(enabled);
+      setStatus('smsStatus', enabled ? 'SMS-напоминания включены' : 'SMS-напоминания выключены', enabled ? 'ok' : '');
+    });
+
+    testBtn.addEventListener('click', async () => {
+      testBtn.disabled = true;
+      try {
+        await SMS.testSms();
+        setStatus('smsStatus', 'Тестовое SMS отправлено', 'ok');
+      } catch (e) {
+        setStatus('smsStatus', e.message, 'err');
+      } finally {
+        testBtn.disabled = false;
+      }
+    });
+  }
+
+  /* ====================== ПРОВЕРКА ДЕДЛАЙНОВ ДЛЯ SMS ====================== */
+
+  let deadlineWatcherTimer = null;
+  function startDeadlineWatcher() {
+    clearInterval(deadlineWatcherTimer);
+    if (!window.SMS) return;
+    const tick = () => { if (Auth.isSignedIn()) SMS.checkDeadlines(state.items).catch(() => {}); };
+    tick();
+    deadlineWatcherTimer = setInterval(tick, 5 * 60 * 1000); // раз в 5 минут, пока вкладка открыта
   }
 
   function bindAccount() {
@@ -1430,6 +1520,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
 
     render();
     registerSW();
+    startDeadlineWatcher();
   }
 
   document.addEventListener('DOMContentLoaded', () => {

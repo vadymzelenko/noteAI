@@ -34,6 +34,100 @@ function loadEnv(file) {
 const env  = loadEnv(ENV_PATH);
 const PORT = Number(env.PORT) || 5173;
 
+/* ---------- SMS (Twilio) ---------- */
+// Секреты Twilio живут только тут, на сервере (.env) — браузер их никогда
+// не видит. Клиент лишь просит сервер отправить сообщение своему же
+// авторизованному пользователю; сам номер SMS вводится в настройках клиента.
+
+const smsRateLimit = new Map(); // userId -> [timestamps]
+const SMS_RATE_LIMIT_MAX = 5;
+const SMS_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+function checkSmsRateLimit(userId) {
+  const now = Date.now();
+  const arr = (smsRateLimit.get(userId) || []).filter((t) => now - t < SMS_RATE_LIMIT_WINDOW_MS);
+  if (arr.length >= SMS_RATE_LIMIT_MAX) return false;
+  arr.push(now);
+  smsRateLimit.set(userId, arr);
+  return true;
+}
+
+// Проверяет access_token через Supabase Auth API — так серверу не нужно
+// самому парсить/валидировать JWT и держать отдельный секрет для этого.
+async function verifySupabaseUser(token) {
+  if (!token || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
+  try {
+    const res = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: env.SUPABASE_ANON_KEY },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function readBody(req, limit = 8192) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) { reject(new Error('Тело запроса слишком большое')); req.destroy(); return; }
+      data += chunk;
+    });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+async function sendTwilioSms(to, body) {
+  const sid = env.TWILIO_ACCOUNT_SID, authToken = env.TWILIO_AUTH_TOKEN, from = env.TWILIO_FROM_NUMBER;
+  if (!sid || !authToken || !from) throw new Error('SMS не настроен на сервере (заполни TWILIO_* в .env)');
+  const params = new URLSearchParams({ To: to, From: from, Body: body });
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': 'Basic ' + Buffer.from(`${sid}:${authToken}`).toString('base64'),
+    },
+    body: params.toString(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || `Twilio HTTP ${res.status}`);
+  return data;
+}
+
+async function handleSmsSend(req, res) {
+  const respond = (status, obj) => {
+    res.writeHead(status, withSecurityHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
+    res.end(JSON.stringify(obj));
+  };
+  try {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const user = await verifySupabaseUser(token);
+    if (!user || !user.id) return respond(401, { error: 'Не авторизован' });
+
+    if (!checkSmsRateLimit(user.id)) {
+      return respond(429, { error: `Слишком много SMS — не больше ${SMS_RATE_LIMIT_MAX} в час` });
+    }
+
+    let payload;
+    try { payload = JSON.parse((await readBody(req)) || '{}'); } catch { payload = {}; }
+    const to = String(payload.to || '').trim();
+    const body = String(payload.body || '').trim().slice(0, 500);
+
+    if (!/^\+?[0-9]{7,15}$/.test(to)) return respond(400, { error: 'Некорректный номер телефона' });
+    if (!body) return respond(400, { error: 'Пустое сообщение' });
+
+    const result = await sendTwilioSms(to, body);
+    respond(200, { ok: true, sid: result.sid || null });
+  } catch (e) {
+    respond(500, { error: e.message || 'Ошибка отправки SMS' });
+  }
+}
+
 /* ---------- Runtime-конфиг для фронтенда ---------- */
 function runtimeConfig() {
   return {
@@ -83,6 +177,15 @@ const server = http.createServer((req, res) => {
   }
   if (urlPath === '/') urlPath = '/index.html';
 
+  if (req.method === 'POST' && urlPath === '/api/sms/send') {
+    handleSmsSend(req, res);
+    return;
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, withSecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Allow': 'GET, HEAD, POST' }));
+    return res.end('Method Not Allowed');
+  }
+
   // Динамический конфиг из .env — не кэшируется, отдаётся на каждый запрос.
   // SUPABASE_ANON_KEY — публичный ключ по дизайну Supabase (доступ к данным
   // ограничивается политиками RLS в базе, а не секретностью этого ключа).
@@ -129,5 +232,10 @@ server.listen(PORT, () => {
     console.warn('  ⚠  Supabase не настроен. Заполни .env (SUPABASE_URL, SUPABASE_ANON_KEY).\n');
   } else {
     console.log('  ✓  Supabase сконфигурирован. Вход через Google готов.\n');
+  }
+  if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_FROM_NUMBER) {
+    console.warn('  ⚠  SMS не настроен. Заполни .env (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER), если нужны SMS-напоминания.\n');
+  } else {
+    console.log('  ✓  Twilio сконфигурирован. SMS-напоминания готовы.\n');
   }
 });

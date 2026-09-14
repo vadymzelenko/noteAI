@@ -39,6 +39,7 @@
             done: !!item.done,
             deleted: !!item.deleted,
             deleted_at: toIso(item.deletedAt),
+            draft: !!item.draft,
             font: item.font === 'mono' ? 'mono' : 'sans',
             created_at: toIso(item.createdAt) || new Date().toISOString(),
             updated_at: toIso(item.updatedAt) || new Date().toISOString(),
@@ -57,6 +58,7 @@
             references: row.references_ids || [],
             done: !!row.done,
             deleted: !!row.deleted,
+            draft: !!row.draft,
             font: row.font === 'mono' ? 'mono' : 'sans',
             createdAt: toMs(row.created_at),
             updatedAt: toMs(row.updated_at),
@@ -114,5 +116,20 @@
         if (error) throw error;
     }
 
-    window.DB = { allItems, upsertItem, deleteItem, purgeExpired };
+    // Черновики (draft=true, ни разу не сохранённые явно кнопкой «Сохранить»)
+    // живут те же 14 дней, но с момента СОЗДАНИЯ, а не удаления — у них нет
+    // отдельной deleted_at-метки.
+    async function purgeExpiredDrafts() {
+        const userId = currentUserId();
+        const cutoff = new Date(Date.now() - TRASH_TTL_MS).toISOString();
+        const { error } = await client()
+            .from(TABLE)
+            .delete()
+            .eq('user_id', userId)
+            .eq('draft', true)
+            .lt('created_at', cutoff);
+        if (error) throw error;
+    }
+
+    window.DB = { allItems, upsertItem, deleteItem, purgeExpired, purgeExpiredDrafts };
 })();

@@ -158,6 +158,14 @@ button { font-family: inherit; color: inherit; cursor: pointer; letter-spacing: 
 input, textarea, select { font-family: inherit; color: inherit; font-size: inherit; letter-spacing: inherit; }
 svg { display: block; }
 
+/* Touch-friendly: убираем синюю/серую вспышку при тапе на iOS/Android и
+   отключаем жест двойного тапа для зума на интерактивных элементах —
+   без этого между тапом и реакцией на мобильном ощущалась задержка. */
+button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .tool {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
 :focus { outline: none; }
 :focus-visible {
   outline: none;
@@ -998,7 +1006,14 @@ svg { display: block; }
   }
   .ai-tool-label { display: inline; }
 
-  .checkbox { width: 23px; height: 23px; }
+  /* Touch-таргеты: на мобильном подтягиваем интерактивные элементы к
+     рекомендуемому минимуму ~44px, чтобы не промахиваться пальцем. */
+  .checkbox { width: 26px; height: 26px; }
+  .icon-btn { width: 44px; height: 44px; }
+  .tool { width: 40px; height: 40px; font-size: 14px; }
+  .item-row.clickable { min-height: 44px; }
+  .chip { min-height: 36px; padding: 7px 12px; }
+
   .quick-add-bar { flex-direction: column; align-items: stretch; }
   .quick-add-bar .btn { width: 100%; justify-content: center; }
 }

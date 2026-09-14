@@ -45,8 +45,9 @@
     }
 
     // Читает конфиг ИИ, сохранённый в аккаунте (Supabase), если пользователь
-    // вошёл. При успехе перекрывает текущий локальный конфиг облачным —
-    // так один и тот же ключ доступен на любом устройстве после входа.
+    // вошёл. Ключ туда никогда не попадает (см. saveToCloud) — облако несёт
+    // только провайдера/модель/baseUrl, apiKey остаётся только в localStorage
+    // этого устройства и вводится заново на каждом новом устройстве.
     async function loadFromCloud() {
         if (!window.Auth || !window.Auth.isSignedIn() || !window.DB) return false;
         try {
@@ -60,6 +61,7 @@
                 .maybeSingle();
             if (error || !data || !data.body) return false;
             const cloudConfig = JSON.parse(data.body);
+            delete cloudConfig.apiKey; // на всякий случай — старые записи могли содержать ключ
             Object.assign(config, cloudConfig);
             config.enabled = !!config.provider && (!!config.apiKey || config.provider === 'local');
             localStorage.setItem(KEY, JSON.stringify(config));
@@ -70,19 +72,24 @@
         }
     }
 
-    // Сохраняет текущий конфиг ИИ (включая ключ) в аккаунт пользователя,
-    // чтобы не вводить его заново на других устройствах.
+    // Сохраняет НЕ-секретную часть конфига (провайдер/модель/baseUrl) в аккаунт
+    // пользователя, чтобы не настраивать заново провайдера на каждом устройстве.
+    // API-ключ намеренно НЕ уходит в облако: раньше он писался в открытом виде
+    // в таблицу items (тело служебной заметки), а это секрет, а не заметка —
+    // при компрометации БД/бэкапа он утёк бы вместе с обычными данными.
+    // Ключ живёт только в localStorage текущего браузера.
     async function saveToCloud() {
         if (!window.Auth || !window.Auth.isSignedIn()) throw new Error('Нужно войти в аккаунт');
         const sb = window.Auth.client;
         const userId = window.Auth.user.id;
         const now = new Date().toISOString();
+        const { apiKey, ...configWithoutKey } = config;
         const row = {
             id: CLOUD_RECORD_ID,
             user_id: userId,
             type: 'note',
             title: '__ai_settings__',
-            body: JSON.stringify(config),
+            body: JSON.stringify(configWithoutKey),
             category: '',
             tags: [],
             references_ids: [],
