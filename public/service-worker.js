@@ -1,6 +1,6 @@
 // NodeFlow service worker — офлайн-кэш оболочки.
 
-const CACHE_VERSION = 'nodeflow-v12';
+const CACHE_VERSION = 'nodeflow-v13';
 const SHELL_FILES = [
     '/',
     '/index.html',
