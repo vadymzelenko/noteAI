@@ -133,6 +133,12 @@
           <span class="field-label">Ссылки</span>
           <div class="ref-picker" id="editorRefs"></div>
         </div>
+
+        <div class="field span-2" data-task-only>
+          <span class="field-label">Подзадачи</span>
+          <div class="subtask-editor" id="editorSubtasks"></div>
+          <button type="button" class="btn sm ghost subtask-add" id="editorSubtaskAdd">+ Подзадача</button>
+        </div>
       </div>
 
       <div class="toolbar">
@@ -177,6 +183,33 @@
     <footer class="modal-foot">
       <button class="btn ghost" id="editorCancel">Отмена</button>
       <button class="btn primary" id="editorSave">Сохранить</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ================= Просмотр записи ================= -->
+<div class="modal-overlay" id="viewerOverlay" aria-hidden="true">
+  <div class="modal">
+    <header class="modal-head">
+      <div class="viewer-head-title">
+        <span class="mini-tag muted" id="viewerType">Задача</span>
+        <h2 class="modal-title" id="viewerTitle"></h2>
+      </div>
+      <div class="modal-head-actions">
+        <button class="icon-btn" id="viewerDelete" title="В корзину">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+        <button class="icon-btn" id="viewerClose" title="Закрыть">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="modal-body" id="viewerBody"></div>
+
+    <footer class="modal-foot">
+      <button class="btn ghost" id="viewerToggleDone">Отметить выполненной</button>
+      <button class="btn primary" id="viewerEdit">Редактировать</button>
     </footer>
   </div>
 </div>
