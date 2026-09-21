@@ -25,10 +25,7 @@
     filtersOpen: false,
     editingId: null,
     editingType: 'task',
-    viewingId: null,
   };
-
-  const IMPORTANCE_LABEL = { red: 'Важно', yellow: 'Средне', green: 'Не срочно' };
 
   /* ====================== УТИЛИТЫ ====================== */
 
@@ -191,29 +188,6 @@
   // («Черновики» / «Корзина»).
   const hidden = (it) => deleted(it) || draft(it);
 
-  // Таймер дедлайна «живой» только у активной задачи. Выполненная задача,
-  // задача в корзине и черновик больше ничего не отсчитывают: раньше
-  // remaining() вызывался безусловно, поэтому у сделанной (или удалённой)
-  // задачи счётчик продолжал тикать и со временем превращался в
-  // «просрочено N дней». Теперь дедлайн у таких записей показывается
-  // статичной датой.
-  const timerRunning = (it) => it.type === 'task' && !it.done && !deleted(it) && !draft(it);
-
-  const subList = (it) => (Array.isArray(it.subtasks) ? it.subtasks : []);
-  function subStats(it) {
-    const list = subList(it);
-    return { total: list.length, done: list.filter((s) => s.done).length };
-  }
-
-  // Единственная точка, где задача переводится в «выполнено» и обратно —
-  // чтобы completedAt (момент завершения) всегда был согласован с done.
-  function setDone(it, done) {
-    it.done = !!done;
-    if (it.done) it.completedAt = Date.now();
-    else delete it.completedAt;
-    persist(it).catch((err) => console.error('[toggle]', err));
-  }
-
   function sortTasks(items) {
     return [...items].sort((a, b) => {
       if (a.done !== b.done) return a.done ? 1 : -1;
@@ -241,11 +215,38 @@
 
   /* ====================== СИНХРОНИЗАЦИЯ ====================== */
 
+  let syncStatusTimer = null;
+
   function setSyncStatus(text, kind) {
     const el = document.getElementById('syncStatus');
     if (!el) return;
-    el.textContent = text || '';
     el.className = 'sync-status ' + (kind || '');
+    el.setAttribute('aria-label', text || '');
+    el.title = text || '';
+    // «Сохранено»/ошибку гасим через пару секунд, «Сохранение…» держим,
+    // пока идёт запрос — иначе точка постоянно висит в шапке.
+    if (kind === 'ok' || kind === 'err') {
+      clearTimeout(syncStatusTimer);
+      syncStatusTimer = setTimeout(() => {
+        el.className = 'sync-status';
+        el.removeAttribute('aria-label');
+        el.title = '';
+      }, 2600);
+    }
+  }
+
+  /* --- Тост-уведомления (ненавязчивая обратная связь) --- */
+  function toast(msg, kind = 'info', ms = 2600) {
+    const stack = document.getElementById('toastStack');
+    if (!stack) return;
+    const el = document.createElement('div');
+    el.className = 'toast ' + kind;
+    el.innerHTML = `<span class="dot"></span><span>${escapeHtml(msg)}</span>`;
+    stack.appendChild(el);
+    setTimeout(() => {
+      el.classList.add('leaving');
+      setTimeout(() => el.remove(), 200);
+    }, ms);
   }
 
   async function loadItems() {
@@ -314,11 +315,11 @@
   async function runQuickAdd(text, btn, input) {
     if (!text) return;
     if (!AI.config.enabled) {
-      alert('ИИ не настроен. Открой «Настройки» → ИИ и укажи провайдера и ключ.');
+      toast('ИИ не настроен — открой «Настройки» → ИИ', 'err');
       return;
     }
     if (!Auth.isSignedIn()) {
-      alert('Нужно войти в аккаунт, чтобы сохранять записи.');
+      toast('Нужно войти в аккаунт, чтобы сохранять записи', 'err');
       return;
     }
 
@@ -348,9 +349,10 @@
       await persist(item);
       input.value = '';
       render();
+      toast(`Добавлено: ${parsed.title || 'запись'}`, 'ok');
     } catch (e) {
       console.error('[quick-add]', e);
-      alert('Не получилось разобрать запрос: ' + (e.message || 'ошибка ИИ'));
+      toast('Не получилось разобрать запрос', 'err');
     } finally {
       btn.disabled = false; input.disabled = false;
       btn.textContent = prevLabel;
@@ -362,6 +364,12 @@
   function applyTheme(name) {
     state.theme = name;
     document.body.dataset.theme = name;
+    // Держим theme-color (цвет статус-бара PWA) в тон текущей теме.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      const bg = getComputedStyle(document.body).getPropertyValue('--bg').trim();
+      meta.setAttribute('content', bg || '#000000');
+    }
     const el = document.getElementById('themeLabel');
     if (el) el.textContent = THEME_LABELS[name] || name;
     localStorage.setItem('nf.theme', name);
@@ -432,28 +440,12 @@
     `;
   }
 
-  const editBtnHtml = (id) => `
-    <button class="icon-btn row-edit" data-edit="${id}" title="Редактировать">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-    </button>`;
-
-  function deadlineTagHtml(it) {
-    if (!it.deadline) return '';
-    const rem = timerRunning(it) ? remaining(it.deadline) : null;
-    if (!rem) return `<span class="timer frozen">⏱ ${escapeHtml(fmtTime(it.deadline))}</span>`;
-    const cls = rem.kind === 'overdue' ? 'timer overdue' : rem.kind === 'soon' ? 'timer soon' : 'timer';
-    return `<span class="${cls}">⏱ ${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>`;
-  }
-
   function renderTaskRow(it) {
+    const rem = remaining(it.deadline);
+    const cls = rem ? (rem.kind === 'overdue' ? 'timer overdue' : rem.kind === 'soon' ? 'timer soon' : 'timer') : 'timer';
     const tags = (it.tags||[]).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
     const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
     const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 200))}</div>` : '';
-    const st = subStats(it);
-    const subTag = st.total ? `<span class="mini-tag ${st.done === st.total ? 'accent' : 'muted'}">☑ ${st.done}/${st.total}</span>` : '';
-    const doneTag = it.done
-        ? `<span class="timer done">✓ выполнено${it.completedAt ? ' · ' + escapeHtml(fmtTime(it.completedAt)) : ''}</span>`
-        : '';
     return `
       <div class="item-row clickable ${it.done ? 'done' : ''}" data-id="${it.id}">
         <span class="importance-dot ${it.importance || 'green'}"></span>
@@ -464,11 +456,10 @@
           <div class="item-title ${it.done ? 'done' : ''}">${escapeHtml(it.title || '(без названия)')}</div>
           ${desc}
           <div class="item-meta">
-            ${cat}${tags}${subTag}
-            ${deadlineTagHtml(it)}${doneTag}
+            ${cat}${tags}
+            ${rem ? `<span class="${cls}">⏱ ${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>` : ''}
           </div>
         </div>
-        ${editBtnHtml(it.id)}
       </div>
     `;
   }
@@ -489,7 +480,6 @@
           ${desc}
           <div class="item-meta">${cat}${tags}${refs}</div>
         </div>
-        ${editBtnHtml(it.id)}
       </div>
     `;
   }
@@ -661,12 +651,13 @@
         e.stopPropagation();
         const it = state.items.find((x) => x.id === el.dataset.toggle);
         if (!it) return;
+        it.done = !it.done;
         // Оптимистичный UI: перерисовываем сразу, не дожидаясь ответа сети —
         // раньше ждали `await persist()` ДО render(), из-за чего галочка
         // «зависала» до ответа сервера. Само сохранение идёт в фоне;
         // при ошибке persist() уже показывает статус через setSyncStatus.
-        setDone(it, !it.done);
         render();
+        persist(it).catch((err) => console.error('[toggle]', err));
       });
     });
     scope.querySelectorAll('.item-row[data-id]').forEach((el) => {
@@ -674,20 +665,8 @@
       el.dataset.bound = '1';
       el.addEventListener('click', (e) => {
         if (e.target.closest('.checkbox')) return;
-        if (e.target.closest('.row-edit')) return;
         if (e.target.closest('a.ref, a.mini-tag')) return;
         const it = state.items.find((x) => x.id === el.dataset.id);
-        // Клик по строке = ЧТЕНИЕ. Правка — только через кнопку-карандаш
-        // или «Редактировать» в окне просмотра.
-        if (it) openViewer(it);
-      });
-    });
-    scope.querySelectorAll('.row-edit[data-edit]').forEach((el) => {
-      if (el.dataset.bound) return;
-      el.dataset.bound = '1';
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const it = state.items.find((x) => x.id === el.dataset.edit);
         if (it) openEditor(it, it.type);
       });
     });
@@ -697,7 +676,7 @@
       a.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation();
         const it = state.items.find((x) => x.id === a.dataset.ref);
-        if (it) openViewer(it);
+        if (it) openEditor(it, it.type);
       });
     });
   }
@@ -879,9 +858,8 @@
   const editor = {
     overlay:null, titleEl:null, categoryEl:null, tagsEl:null,
     deadlineEl:null, importanceEl:null, fontEl:null,
-    bodyEl:null, previewEl:null, refsEl:null, subtasksEl:null,
+    bodyEl:null, previewEl:null, refsEl:null,
     refsSelected: new Set(),
-    subtasks: [],
   };
   let autosaveTimer = null;
   let aiBusy = false;
@@ -902,7 +880,7 @@
 
     const t = item || {
       title:'', body:'', category:'', tags:[],
-      importance:'green', deadline:null, font:'sans', references:[], done:false, subtasks:[],
+      importance:'green', deadline:null, font:'sans', references:[], done:false,
     };
 
     editor.titleEl.value = t.title || '';
@@ -914,8 +892,6 @@
     editor.bodyEl.value = t.body || '';
 
     editor.refsSelected = new Set(t.references || []);
-    editor.subtasks = subList(t).map((sub) => ({ id: sub.id || uid(), text: sub.text || '', done: !!sub.done }));
-    renderSubtaskEditor();
     renderRefPicker();
     renderCategoryDatalist();
     setEditorType(state.editingType);
@@ -970,68 +946,18 @@
     });
   }
 
-  /* ---------- Подзадачи в редакторе ---------- */
-  // Подзадачи — намеренно простые записи: галочка + строка текста.
-  // Никаких дедлайнов/важности у них нет, они живут внутри задачи
-  // (колонка items.subtasks типа jsonb, см. миграцию в README).
-
-  function renderSubtaskEditor() {
-    const wrap = editor.subtasksEl;
-    if (!wrap) return;
-    if (!editor.subtasks.length) {
-      wrap.innerHTML = '<span class="mini-tag muted">подзадач пока нет</span>';
-      return;
-    }
-    wrap.innerHTML = editor.subtasks.map((sub, i) => `
-      <div class="subtask-row">
-        <div class="checkbox sm ${sub.done ? 'checked' : ''}" data-sub-done="${i}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
-        <input type="text" class="subtask-input" data-sub-text="${i}" value="${escapeHtml(sub.text)}" placeholder="Что нужно сделать">
-        <button type="button" class="icon-btn subtask-del" data-sub-del="${i}" title="Убрать подзадачу">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-    `).join('');
-
-    wrap.querySelectorAll('[data-sub-done]').forEach((el) => {
-      el.addEventListener('click', () => {
-        const sub = editor.subtasks[+el.dataset.subDone];
-        sub.done = !sub.done;
-        el.classList.toggle('checked', sub.done);
-        scheduleAutosave();
-      });
-    });
-    wrap.querySelectorAll('[data-sub-text]').forEach((el) => {
-      // Текст меняем в модели без перерисовки списка — иначе поле теряло бы
-      // фокус на каждом введённом символе.
-      el.addEventListener('input', () => {
-        editor.subtasks[+el.dataset.subText].text = el.value;
-        scheduleAutosave();
-      });
-      el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); addSubtask(); }
-      });
-    });
-    wrap.querySelectorAll('[data-sub-del]').forEach((el) => {
-      el.addEventListener('click', () => {
-        editor.subtasks.splice(+el.dataset.subDel, 1);
-        renderSubtaskEditor();
-        scheduleAutosave();
-      });
-    });
-  }
-
-  function addSubtask() {
-    editor.subtasks.push({ id: uid(), text: '', done: false });
-    renderSubtaskEditor();
-    const inputs = editor.subtasksEl.querySelectorAll('.subtask-input');
-    if (inputs.length) inputs[inputs.length - 1].focus();
+  function updateCharCount() {
+    const el = document.getElementById('charCount');
+    if (!el || !editor.bodyEl) return;
+    const text = (editor.titleEl.value + '\n' + editor.bodyEl.value);
+    const words = (text.trim().match(/\S+/g) || []).length;
+    el.textContent = `${words} сл. · ${text.length} симв.`;
   }
 
   function updatePreview() {
     const body = editor.bodyEl.value;
     editor.previewEl.innerHTML = body.trim() ? renderBody(body) : '';
+    updateCharCount();
   }
 
   function insertAtCursor(text) {
@@ -1135,15 +1061,10 @@
     if (item.type === 'task') {
       item.deadline = fromLocalInput(editor.deadlineEl.value);
       item.importance = editor.importanceEl.value;
-      item.subtasks = editor.subtasks
-          .map((sub) => ({ id: sub.id || uid(), text: String(sub.text || '').trim(), done: !!sub.done }))
-          .filter((sub) => sub.text);
     } else {
       delete item.deadline;
       delete item.importance;
-      item.subtasks = [];
       item.done = false;
-      delete item.completedAt;
     }
     return item;
   }
@@ -1202,6 +1123,7 @@
       await persistFromEditor(false);
       closeEditor();
       render();
+      toast('Сохранено', 'ok');
     } finally {
       if (saveBtn) saveBtn.disabled = false;
     }
@@ -1213,6 +1135,7 @@
     await softDeleteItem(state.editingId);
     closeEditor();
     render();
+    toast('Перемещено в корзину', 'info');
   }
 
   function bindEditor() {
@@ -1226,10 +1149,6 @@
     editor.bodyEl = document.getElementById('editorBody');
     editor.previewEl = document.getElementById('editorPreview');
     editor.refsEl = document.getElementById('editorRefs');
-    editor.subtasksEl = document.getElementById('editorSubtasks');
-
-    const subAdd = document.getElementById('editorSubtaskAdd');
-    if (subAdd) subAdd.addEventListener('click', addSubtask);
 
     document.querySelectorAll('#editorTypeSwitch button').forEach((b) => {
       b.addEventListener('click', () => { setEditorType(b.dataset.type); scheduleAutosave(); });
@@ -1279,138 +1198,6 @@
     document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true; });
   }
 
-  /* ====================== ПРОСМОТР (только чтение) ====================== */
-  // Чтение и редактирование разведены: клик по записи открывает это окно,
-  // где текст отрисован как markdown и ничего нельзя случайно затереть.
-  // Правка — отдельный шаг: кнопка «Редактировать» здесь или карандаш
-  // в строке списка.
-
-  const viewedItem = () => state.items.find((x) => x.id === state.viewingId) || null;
-
-  function openViewer(item) {
-    if (!item) return;
-    state.viewingId = item.id;
-    const o = document.getElementById('viewerOverlay');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    renderViewer();
-  }
-
-  function closeViewer() {
-    const o = document.getElementById('viewerOverlay');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-    state.viewingId = null;
-  }
-
-  function renderViewer() {
-    const it = viewedItem();
-    if (!it) { closeViewer(); return; }
-    const body = document.getElementById('viewerBody');
-
-    document.getElementById('viewerType').textContent = it.type === 'task' ? 'Задача' : 'Заметка';
-    document.getElementById('viewerTitle').textContent = it.title || '(без названия)';
-
-    const doneBtn = document.getElementById('viewerToggleDone');
-    doneBtn.hidden = it.type !== 'task';
-    doneBtn.textContent = it.done ? 'Вернуть в работу' : 'Отметить выполненной';
-
-    const chips = [];
-    if (it.category) chips.push(`<span class="mini-tag muted">${escapeHtml(it.category)}</span>`);
-    (it.tags || []).forEach((t) => chips.push(`<span class="mini-tag">#${escapeHtml(t)}</span>`));
-    if (it.type === 'task') {
-      const imp = it.importance || 'green';
-      chips.push(`<span class="mini-tag imp-${imp}">${IMPORTANCE_LABEL[imp]}</span>`);
-      if (it.deadline) {
-        chips.push(timerRunning(it)
-            ? deadlineTagHtml(it)
-            : `<span class="timer frozen">⏱ дедлайн ${escapeHtml(fmtTime(it.deadline))} · таймер остановлен</span>`);
-      }
-      if (it.done) {
-        chips.push(`<span class="timer done">✓ выполнено${it.completedAt ? ' · ' + escapeHtml(fmtTime(it.completedAt)) : ''}</span>`);
-      }
-    }
-
-    const subs = it.type === 'task' ? subList(it) : [];
-    const st = subStats(it);
-    const subsHtml = subs.length ? `
-      <div class="viewer-section">
-        <div class="field-label">Подзадачи · ${st.done}/${st.total}</div>
-        <div class="subtask-list">
-          ${subs.map((sub) => `
-            <div class="subtask-row readonly">
-              <div class="checkbox sm ${sub.done ? 'checked' : ''}" data-sub-toggle="${escapeHtml(sub.id)}">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-              <span class="subtask-text ${sub.done ? 'done' : ''}">${escapeHtml(sub.text)}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>` : '';
-
-    const refs = (it.references || []).map((r) => {
-      const t = state.items.find((x) => x.id === r);
-      if (!t || t.deleted) return '';
-      return `<a class="mini-tag accent" data-ref="${t.id}" href="#">↗ ${escapeHtml(t.title || '(без названия)')}</a>`;
-    }).join('');
-
-    body.innerHTML = `
-      ${chips.length ? `<div class="viewer-meta">${chips.join('')}</div>` : ''}
-      ${subsHtml}
-      <div class="preview md ${it.font === 'mono' ? 'font-mono' : ''} viewer-text">${
-        it.body && it.body.trim() ? renderBody(it.body) : '<p class="hint" style="margin:0">Текста нет</p>'}</div>
-      ${refs ? `<div class="viewer-section"><div class="field-label">Ссылки</div><div class="item-meta">${refs}</div></div>` : ''}
-      <div class="viewer-stamp">создано ${escapeHtml(fmtTime(it.createdAt))}${it.updatedAt ? ' · изменено ' + escapeHtml(fmtTime(it.updatedAt)) : ''}</div>
-    `;
-
-    body.querySelectorAll('[data-sub-toggle]').forEach((el) => {
-      el.addEventListener('click', () => toggleSubtask(it.id, el.dataset.subToggle));
-    });
-    body.querySelectorAll('a.mini-tag[data-ref]').forEach((a) => {
-      a.addEventListener('click', (e) => {
-        e.preventDefault();
-        const t = state.items.find((x) => x.id === a.dataset.ref);
-        if (t) openViewer(t);
-      });
-    });
-  }
-
-  function toggleSubtask(itemId, subId) {
-    const it = state.items.find((x) => x.id === itemId);
-    if (!it) return;
-    const sub = subList(it).find((x) => x.id === subId);
-    if (!sub) return;
-    sub.done = !sub.done;
-    renderViewer();
-    render();
-    persist(it).catch((err) => console.error('[subtask]', err));
-  }
-
-  function bindViewer() {
-    document.getElementById('viewerClose').addEventListener('click', closeViewer);
-    document.getElementById('viewerEdit').addEventListener('click', () => {
-      const it = viewedItem();
-      if (!it) return;
-      closeViewer();
-      openEditor(it, it.type);
-    });
-    document.getElementById('viewerToggleDone').addEventListener('click', () => {
-      const it = viewedItem();
-      if (!it) return;
-      setDone(it, !it.done);
-      renderViewer();
-      render();
-    });
-    document.getElementById('viewerDelete').addEventListener('click', async () => {
-      const it = viewedItem();
-      if (!it) return;
-      if (!confirm('Переместить в корзину? Восстановить можно 14 дней.')) return;
-      await softDeleteItem(it.id);
-      closeViewer();
-      render();
-    });
-  }
-
   /* ====================== КОРЗИНА ====================== */
 
   function openTrash() {
@@ -1431,18 +1218,15 @@
     list.innerHTML = items.map((it) => {
       const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.deletedAt||0))) / 86400000));
       return `
-        <div class="item-row">
+        <div class="item-row item-row-actions">
           <div class="item-body">
             <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
             <div class="item-meta">
               <span class="mini-tag muted">${it.type === 'task' ? 'Задача' : 'Заметка'}</span>
               <span class="mini-tag muted">осталось ${days} дн.</span>
-              ${it.type === 'task' && it.deadline
-        ? `<span class="timer frozen">⏱ ${escapeHtml(fmtTime(it.deadline))} · таймер остановлен</span>`
-        : ''}
             </div>
           </div>
-          <div class="view-actions">
+          <div class="item-actions">
             <button class="btn sm" data-restore="${it.id}">Восстановить</button>
             <button class="btn sm ghost" data-purge="${it.id}">Удалить</button>
           </div>
@@ -1450,13 +1234,13 @@
       `;
     }).join('');
     list.querySelectorAll('[data-restore]').forEach((b) => {
-      b.addEventListener('click', async () => { await restoreItem(b.dataset.restore); renderTrashList(); render(); });
+      b.addEventListener('click', async () => { await restoreItem(b.dataset.restore); renderTrashList(); render(); toast('Восстановлено', 'ok'); });
     });
     list.querySelectorAll('[data-purge]').forEach((b) => {
       b.addEventListener('click', async () => {
         if (!confirm('Удалить навсегда?')) return;
         await purgeItem(b.dataset.purge);
-        renderTrashList(); render();
+        renderTrashList(); render(); toast('Удалено навсегда', 'info');
       });
     });
   }
@@ -1499,7 +1283,7 @@
     list.innerHTML = items.map((it) => {
       const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.createdAt || 0))) / 86400000));
       return `
-        <div class="item-row">
+        <div class="item-row item-row-actions">
           <div class="item-body">
             <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
             <div class="item-meta">
@@ -1507,7 +1291,7 @@
               <span class="mini-tag muted">удалится через ${days} дн.</span>
             </div>
           </div>
-          <div class="view-actions">
+          <div class="item-actions">
             <button class="btn sm" data-open-draft="${it.id}">Открыть</button>
             <button class="btn sm ghost" data-delete-draft="${it.id}">Удалить</button>
           </div>
@@ -1804,14 +1588,177 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     gsap.fromTo('.topbar, .content-card', { opacity:0, y:10 }, { opacity:1, y:0, duration:.7, delay:.9, stagger:.08, ease:'power3.out', clearProps:'all' });
   }
 
+  /* ====================== МОДАЛКИ-ХЕЛПЕРЫ (для палитры) ====================== */
+
+  function openSettingsModal() {
+    const overlay = document.getElementById('settingsOverlay');
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    refreshAiSettingsForm();
+    const rememberEl = document.getElementById('aiRemember');
+    const rememberRow = document.getElementById('aiRememberRow');
+    if (rememberEl) rememberEl.checked = false;
+    if (rememberRow) rememberRow.hidden = !Auth.isSignedIn();
+    setStatus('aiStatus', '', '');
+    refreshEmailSettingsForm();
+    setStatus('emailStatus', '', '');
+  }
+
+  function openAccountModal() {
+    const overlay = document.getElementById('accountOverlay');
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+    renderAccountBody();
+  }
+
+  /* ====================== КОМАНДНАЯ ПАЛИТРА (⌘/Ctrl+K) ====================== */
+
+  let paletteIndex = 0;
+  let paletteEntries = [];
+
+  function paletteCommands() {
+    const signedIn = Auth.isSignedIn();
+    return [
+      { id:'new-task', icon:'🆕', title:'Новая задача', hint:'задача', run: () => openEditor(null, 'task') },
+      { id:'new-note', icon:'📝', title:'Новая заметка', hint:'заметка', run: () => openEditor(null, 'note') },
+      { id:'mode', icon:'🔁', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : 'сейчас заметки', run: () => toggleMode() },
+      { id:'theme', icon:'🎨', title:'Сменить тему', hint: THEME_LABELS[state.theme] || state.theme, run: () => cycleTheme() },
+      { id:'metrics', icon:'📊', title:'Аналитика', hint:'статистика', run: () => openMetrics() },
+      { id:'drafts', icon:'🗂', title:'Черновики', hint:'несохранённые', run: () => openDrafts() },
+      { id:'trash', icon:'🗑', title:'Корзина', hint:'удалённые', run: () => openTrash() },
+      { id:'settings', icon:'⚙️', title:'Настройки', hint:'ИИ и email', run: () => openSettingsModal() },
+      { id:'account', icon:'👤', title: signedIn ? 'Аккаунт' : 'Войти', hint: signedIn ? (Auth.user?.email || 'аккаунт') : 'Google', run: () => openAccountModal() },
+    ];
+  }
+
+  function paletteSearch(q) {
+    if (!q) return [];
+    const needle = q.toLowerCase();
+    return state.items
+        .filter((x) => !hidden(x))
+        .filter((x) => ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle))
+        .slice(0, 8)
+        .map((x) => ({
+          id: 'item-' + x.id,
+          icon: x.type === 'task' ? '✓' : '¶',
+          title: x.title || '(без названия)',
+          hint: x.type === 'task' ? 'задача' : 'заметка',
+          run: () => openEditor(x, x.type),
+        }));
+  }
+
+  function highlightMatch(text, q) {
+    const safe = escapeHtml(text);
+    if (!q) return safe;
+    try {
+      const qs = escapeHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return safe.replace(new RegExp('(' + qs + ')', 'ig'), '<mark>$1</mark>');
+    } catch { return safe; }
+  }
+
+  function paletteHtml(q) {
+    const ql = q.toLowerCase();
+    const cmds = paletteCommands().filter((c) => !q || c.title.toLowerCase().includes(ql));
+    const items = paletteSearch(q);
+    const parts = [];
+    if (cmds.length) {
+      parts.push('<div class="palette-section">Команды</div>');
+      cmds.forEach((c) => parts.push(
+        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico" style="width:18px;text-align:center;flex-shrink:0">${c.icon}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
+    }
+    if (items.length) {
+      parts.push('<div class="palette-section">Записи</div>');
+      items.forEach((c) => parts.push(
+        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico" style="width:18px;text-align:center;flex-shrink:0">${c.icon}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
+    }
+    if (!parts.length) parts.push('<div class="palette-empty">Ничего не найдено</div>');
+    return parts.join('');
+  }
+
+  function renderPalette(q) {
+    const list = document.getElementById('paletteList');
+    paletteEntries = paletteCommands()
+        .filter((c) => !q || c.title.toLowerCase().includes(q.toLowerCase()))
+        .concat(paletteSearch(q));
+    list.innerHTML = paletteHtml(q);
+    list.querySelectorAll('.palette-item').forEach((btn, i) => {
+      btn.addEventListener('click', () => {
+        const entry = paletteEntries[i];
+        closePalette();
+        if (entry) entry.run();
+      });
+      btn.addEventListener('mousemove', () => { paletteIndex = i; updatePaletteActive(); });
+    });
+    paletteIndex = Math.min(paletteIndex, Math.max(0, paletteEntries.length - 1));
+    updatePaletteActive();
+  }
+
+  function updatePaletteActive() {
+    document.querySelectorAll('#paletteList .palette-item').forEach((btn, i) => btn.classList.toggle('active', i === paletteIndex));
+    const active = document.querySelector('#paletteList .palette-item.active');
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function openPalette() {
+    const o = document.getElementById('paletteOverlay');
+    if (!o) return;
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+    const input = document.getElementById('paletteInput');
+    input.value = '';
+    paletteIndex = 0;
+    renderPalette('');
+    input.focus();
+  }
+
+  function closePalette() {
+    const o = document.getElementById('paletteOverlay');
+    if (!o) return;
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function bindPalette() {
+    const input = document.getElementById('paletteInput');
+    const overlay = document.getElementById('paletteOverlay');
+    input.addEventListener('input', () => { paletteIndex = 0; renderPalette(input.value.trim()); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (paletteEntries.length) { paletteIndex = (paletteIndex + 1) % paletteEntries.length; updatePaletteActive(); }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (paletteEntries.length) { paletteIndex = (paletteIndex - 1 + paletteEntries.length) % paletteEntries.length; updatePaletteActive(); }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const entry = paletteEntries[paletteIndex];
+        closePalette();
+        if (entry) entry.run();
+      }
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closePalette(); });
+  }
+
+  /* ====================== СЕТЬ (онлайн/офлайн) ====================== */
+
+  function bindNetwork() {
+    window.addEventListener('offline', () => toast('Нет соединения — работаем офлайн', 'err', 4200));
+    window.addEventListener('online', () => toast('Соединение восстановлено', 'ok'));
+  }
+
   /* ====================== ГОРЯЧИЕ КЛАВИШИ ====================== */
 
   function bindHotkeys() {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        const palette = document.getElementById('paletteOverlay');
+        if (palette && palette.classList.contains('open')) { closePalette(); return; }
         if (editor.overlay.classList.contains('open')) closeEditor();
-        if (state.viewingId) closeViewer();
         document.querySelectorAll('.modal-overlay.open').forEach((o) => { o.classList.remove('open'); o.setAttribute('aria-hidden','true'); });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        openPalette();
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
@@ -1819,6 +1766,14 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         if (editor.overlay.classList.contains('open')) { e.preventDefault(); saveEditor(); }
+      }
+      if (e.key === '/' && !(e.ctrlKey || e.metaKey)) {
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (editor.overlay.classList.contains('open')) return;
+        e.preventDefault();
+        const q = document.getElementById('filterQuery');
+        if (q) q.focus();
       }
     });
   }
@@ -1857,19 +1812,26 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     }
 
     bindEditor();
-    bindViewer();
     bindSettings();
     bindTrash();
     bindDrafts();
     bindHotkeys();
     bindAccount();
+    bindPalette();
+    bindNetwork();
 
     document.getElementById('themeBtn').addEventListener('click', cycleTheme);
     document.getElementById('modeBtn').addEventListener('click', toggleMode);
+    document.getElementById('fabAdd').addEventListener('click', () => openEditor(null, state.mode === 'tasks' ? 'task' : 'note'));
 
     render();
     registerSW();
     startDeadlineWatcher();
+
+    // Глубокие ссылки из ярлыков PWA: /?action=new-task или /?action=new-note
+    const action = new URLSearchParams(location.search).get('action');
+    if (action === 'new-task') openEditor(null, 'task');
+    else if (action === 'new-note') openEditor(null, 'note');
   }
 
   document.addEventListener('DOMContentLoaded', () => {

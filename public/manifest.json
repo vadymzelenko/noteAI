@@ -1,13 +1,22 @@
 {
   "name": "NodeFlow — задачи и заметки",
   "short_name": "NodeFlow",
+  "description": "Офлайн-первый менеджер задач и заметок с markdown, ИИ-помощником и синхронизацией.",
+  "lang": "ru",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0A0A0C",
-  "theme_color": "#0A0A0C",
-  "orientation": "portrait-primary",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["productivity", "utilities"],
   "icons": [
-    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Новая задача", "short_name": "Задача", "url": "/?action=new-task" },
+    { "name": "Новая заметка", "short_name": "Заметка", "url": "/?action=new-note" }
   ]
 }

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="108" fill="#000000"/>
+  <rect width="512" height="512" fill="#000000"/>
   <text x="256" y="256" dominant-baseline="central" text-anchor="middle"
         font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace"
-        font-size="196" font-weight="700" fill="#ffffff" letter-spacing="-8">nf</text>
+        font-size="156" font-weight="700" fill="#ffffff" letter-spacing="-6">nf</text>
 </svg>

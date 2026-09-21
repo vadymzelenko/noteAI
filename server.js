@@ -6,6 +6,7 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const tls  = require('tls');
+const zlib = require('zlib');
 
 const ROOT     = path.join(__dirname, 'public');
 const ENV_PATH = path.join(__dirname, '.env');
@@ -224,6 +225,10 @@ function withSecurityHeaders(headers) {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    // Включается только на https-соединениях; поверх http браузеры её игнорируют,
+    // поэтому локальная разработка не ломается.
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   };
 }
 
@@ -245,6 +250,12 @@ const server = http.createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, withSecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8', 'Allow': 'GET, HEAD, POST' }));
     return res.end('Method Not Allowed');
+  }
+
+  // Лёгкий health-check для мониторинга и проверки, что сервер жив.
+  if (urlPath === '/api/health') {
+    res.writeHead(200, withSecurityHeaders({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }));
+    return res.end(JSON.stringify({ ok: true, app: 'NodeFlow', time: Date.now() }));
   }
 
   // Динамический конфиг из .env — не кэшируется, отдаётся на каждый запрос.
@@ -276,9 +287,33 @@ const server = http.createServer((req, res) => {
     const ext = path.extname(filePath).toLowerCase();
     const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
 
+    // Кэш-политика: html, service worker и манифест всегда свежие (no-cache);
+    // статические ресурсы с «вечным» кэшем — у них имена/версии меняются при
+    // обновлении, поэтому не залипаем на устаревших версиях.
     if (urlPath === '/service-worker.js') {
       headers['Cache-Control'] = 'no-cache';
       headers['Service-Worker-Allowed'] = '/';
+    } else if (urlPath === '/' || urlPath === '/index.html' || urlPath === '/config.js' || urlPath === '/manifest.json') {
+      headers['Cache-Control'] = 'no-cache';
+    } else if (/\.(css|js|mjs|svg|png|jpe?g|ico|woff2?)$/.test(urlPath)) {
+      headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    }
+
+    // gzip для сжимаемых текстовых типов — заметно экономит трафик.
+    const acceptEncoding = req.headers['accept-encoding'] || '';
+    const compressible = /^(text\/|application\/(json|javascript)|image\/svg\+xml)/.test(headers['Content-Type']);
+    if (compressible && /\bgzip\b/.test(acceptEncoding) && data.length > 512) {
+      zlib.gzip(data, { level: 6 }, (zerr, gz) => {
+        if (zerr) {
+          res.writeHead(200, withSecurityHeaders(headers));
+          return res.end(data);
+        }
+        headers['Content-Encoding'] = 'gzip';
+        headers['Vary'] = 'Accept-Encoding';
+        res.writeHead(200, withSecurityHeaders(headers));
+        res.end(gz);
+      });
+      return;
     }
 
     res.writeHead(200, withSecurityHeaders(headers));

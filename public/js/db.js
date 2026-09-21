@@ -36,13 +36,7 @@
             references_ids: Array.isArray(item.references) ? item.references : [],
             importance: item.importance || 'green',
             deadline: toIso(item.deadline),
-            subtasks: Array.isArray(item.subtasks)
-                ? item.subtasks
-                    .filter((st) => st && String(st.text || '').trim())
-                    .map((st) => ({ id: st.id, text: String(st.text).trim(), done: !!st.done }))
-                : [],
             done: !!item.done,
-            completed_at: toIso(item.completedAt),
             deleted: !!item.deleted,
             deleted_at: toIso(item.deletedAt),
             draft: !!item.draft,
@@ -72,9 +66,7 @@
         if (row.type === 'task') {
             item.importance = row.importance || 'green';
             item.deadline = toMs(row.deadline);
-            item.subtasks = Array.isArray(row.subtasks) ? row.subtasks : [];
         }
-        if (row.completed_at) item.completedAt = toMs(row.completed_at);
         if (row.deleted_at) item.deletedAt = toMs(row.deleted_at);
         return item;
     }
@@ -90,37 +82,15 @@
         return (data || []).map(fromRow);
     }
 
-    // Колонки, добавленные позже базовой схемы (см. миграцию в README).
-    // Если их в таблице ещё нет, Supabase вернёт ошибку «column does not
-    // exist» / PGRST204 — тогда один раз отключаем их и работаем дальше
-    // без подзадач, вместо того чтобы ронять всё сохранение.
-    const OPTIONAL_COLS = ['subtasks', 'completed_at'];
-    let optionalColsOk = true;
-
-    const isMissingColumn = (error) => {
-        const msg = ((error && (error.message || error.details || error.hint)) || '').toLowerCase();
-        return error?.code === 'PGRST204' ||
-            OPTIONAL_COLS.some((c) => msg.includes(c)) && (msg.includes('column') || msg.includes('schema cache'));
-    };
-
     async function upsertItem(item) {
         const userId = currentUserId();
         const row = toRow(item, userId);
-        if (!optionalColsOk) OPTIONAL_COLS.forEach((c) => delete row[c]);
         const { data, error } = await client()
             .from(TABLE)
             .upsert(row, { onConflict: 'id' })
             .select()
             .single();
-        if (error) {
-            if (optionalColsOk && isMissingColumn(error)) {
-                optionalColsOk = false;
-                console.warn('[db] В таблице items нет колонок subtasks/completed_at — ' +
-                    'подзадачи не будут сохраняться. Выполни миграцию из README.');
-                return upsertItem(item);
-            }
-            throw error;
-        }
+        if (error) throw error;
         return fromRow(data);
     }
 

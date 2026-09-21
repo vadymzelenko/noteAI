@@ -1,0 +1,14 @@
+{
+  "name": "nodeflow",
+  "version": "1.0.0",
+  "description": "Локальный офлайн-первый менеджер заметок и задач с поддержкой кода, командной строки и синхронизации с Google Диском",
+  "main": "../server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

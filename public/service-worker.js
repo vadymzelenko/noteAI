@@ -12,6 +12,7 @@ const SHELL_FILES = [
     '/js/db.js',
     '/js/app.js',
     '/icons/icon.svg',
+    '/icons/maskable.svg',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js',
     'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css',
