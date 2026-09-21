@@ -1739,6 +1739,142 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closePalette(); });
   }
 
+  /* ====================== ПОИСК ПО ЗАДАЧАМ И ЗАМЕТКАМ ====================== */
+
+  function searchSnippet(text, needle) {
+    const idx = text.toLowerCase().indexOf(needle);
+    if (idx === -1) return escapeHtml(text.slice(0, 140));
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(text.length, idx + needle.length + 80);
+    const pre = escapeHtml(text.slice(start, idx));
+    const match = escapeHtml(text.slice(idx, idx + needle.length));
+    const post = escapeHtml(text.slice(idx + needle.length, end));
+    return (start > 0 ? '…' : '') + pre + '<mark>' + match + '</mark>' + post + (end < text.length ? '…' : '');
+  }
+
+  function searchResultHtml(it, needle) {
+    const meta = [];
+    if (it.category) meta.push(`<span class="mini-tag muted">${escapeHtml(it.category)}</span>`);
+    (it.tags || []).slice(0, 3).forEach((t) => meta.push(`<span class="mini-tag">#${escapeHtml(t)}</span>`));
+    if (it.type === 'task' && it.deadline) {
+      const rem = remaining(it.deadline);
+      const cls = rem && rem.kind === 'overdue' ? 'timer overdue' : rem && rem.kind === 'soon' ? 'timer soon' : 'timer';
+      meta.push(`<span class="${cls}">⏱ ${escapeHtml(rem ? rem.text : '')}</span>`);
+    }
+    const desc = it.body
+        ? `<div class="search-desc">${searchSnippet(it.body, needle)}</div>`
+        : '<div class="search-desc sr-none">Без текста</div>';
+    return `
+      <button class="search-result" data-open="${it.id}">
+        <span class="sr-type">${it.type === 'task' ? '✓' : '¶'}</span>
+        <span class="sr-body">
+          <span class="sr-title">${highlightMatch(it.title || '(без названия)', needle)}</span>
+          ${desc}
+          <span class="sr-meta">${meta.join('')}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  function renderSearch(q) {
+    const body = document.getElementById('searchBody');
+    const needle = q.trim().toLowerCase();
+    if (!needle) {
+      body.innerHTML = '<div class="search-hint">Начни вводить — ищу сразу по заголовкам, тексту и тегам.<br>Переход между результатами — <kbd>↑</kbd> <kbd>↓</kbd>, открыть — <kbd>Enter</kbd></div>';
+      return;
+    }
+    const tasks = state.items
+        .filter((x) => x.type === 'task' && !hidden(x))
+        .filter((x) => ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle))
+        .sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity));
+    const notes = state.items
+        .filter((x) => x.type === 'note' && !hidden(x))
+        .filter((x) => ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+    const parts = [];
+    if (tasks.length) {
+      parts.push(`<div class="search-section">Задачи · ${tasks.length}</div>`);
+      tasks.forEach((it) => parts.push(searchResultHtml(it, needle)));
+    }
+    if (notes.length) {
+      parts.push(`<div class="search-section">Заметки · ${notes.length}</div>`);
+      notes.forEach((it) => parts.push(searchResultHtml(it, needle)));
+    }
+    if (!parts.length) parts.push('<div class="empty-state">Ничего не найдено</div>');
+    body.innerHTML = parts.join('');
+
+    body.querySelectorAll('.search-result').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const it = state.items.find((x) => x.id === btn.dataset.open);
+        if (!it) return;
+        closeSearch();
+        openEditor(it, it.type);
+      });
+    });
+  }
+
+  function openSearch() {
+    const o = document.getElementById('searchOverlay');
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+    const input = document.getElementById('searchInput');
+    input.value = '';
+    renderSearch('');
+    setTimeout(() => input.focus(), 60);
+  }
+
+  function closeSearch() {
+    const o = document.getElementById('searchOverlay');
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function bindSearch() {
+    document.getElementById('searchBtn').addEventListener('click', openSearch);
+    document.getElementById('searchClose').addEventListener('click', closeSearch);
+    const input = document.getElementById('searchInput');
+    input.addEventListener('input', () => renderSearch(input.value));
+    input.addEventListener('keydown', (e) => {
+      const items = [...document.querySelectorAll('#searchBody .search-result')];
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!items.length) return;
+        const idx = items.findIndex((el) => el.classList.contains('active'));
+        const next = (idx + 1) % items.length;
+        items.forEach((el) => el.classList.remove('active'));
+        items[next].classList.add('active');
+        items[next].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!items.length) return;
+        const idx = items.findIndex((el) => el.classList.contains('active'));
+        const prev = idx <= 0 ? items.length - 1 : idx - 1;
+        items.forEach((el) => el.classList.remove('active'));
+        items[prev].classList.add('active');
+        items[prev].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        const active = document.querySelector('#searchBody .search-result.active');
+        if (active) { e.preventDefault(); active.click(); }
+      }
+    });
+  }
+
+  /* ====================== СКРОЛЛ-ЛОК ФОНА ====================== */
+
+  function bindScrollLock() {
+    const overlays = document.querySelectorAll('.modal-overlay, .palette-overlay');
+    const update = () => {
+      const anyOpen = !!document.querySelector('.modal-overlay.open, .palette-overlay.open');
+      document.documentElement.classList.toggle('no-scroll', anyOpen);
+      document.body.classList.toggle('no-scroll', anyOpen);
+    };
+    overlays.forEach((el) => {
+      new MutationObserver(update).observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
+    update();
+  }
+
   /* ====================== СЕТЬ (онлайн/офлайн) ====================== */
 
   function bindNetwork() {
@@ -1772,8 +1908,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         if (editor.overlay.classList.contains('open')) return;
         e.preventDefault();
-        const q = document.getElementById('filterQuery');
-        if (q) q.focus();
+        openSearch();
       }
     });
   }
@@ -1819,6 +1954,8 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     bindAccount();
     bindPalette();
     bindNetwork();
+    bindSearch();
+    bindScrollLock();
 
     document.getElementById('themeBtn').addEventListener('click', cycleTheme);
     document.getElementById('modeBtn').addEventListener('click', toggleMode);

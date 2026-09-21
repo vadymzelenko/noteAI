@@ -225,7 +225,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   min-height: 100vh;
   min-height: 100dvh; /* dvh учитывает появление/скрытие адресной строки браузера на мобильном — без этого высота "прыгала" */
   display: flex; flex-direction: column; align-items: center;
-  padding: max(26px, env(safe-area-inset-top)) 20px 100px;
+  padding: calc(26px + env(safe-area-inset-top, 0px)) 20px 100px;
   gap: 16px;
 }
 .topbar {
@@ -965,7 +965,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 
 /* ---------- Адаптив ---------- */
 @media (max-width: 720px) {
-  .app { padding: max(12px, env(safe-area-inset-top)) 10px 100px; gap: 12px; }
+  .app { padding: calc(16px + env(safe-area-inset-top, 0px)) 10px calc(100px + env(safe-area-inset-bottom, 0px)); gap: 12px; }
   .content-card { padding: 16px; border-radius: var(--r-lg); }
   .brand-name { display: none; }
   .topbar { padding: 10px 10px 10px 12px; gap: 6px; }
@@ -1216,7 +1216,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   width: 10px; height: 10px; border-radius: 50%;
   flex-shrink: 0;
   background: transparent;
-  display: none;
+  display: flex;
   transition: background .2s var(--ease);
 }
 .sync-status.ok, .sync-status.busy, .sync-status.err { display: block; }
@@ -1372,6 +1372,86 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   .item-actions { width: 100%; margin-left: 0; justify-content: flex-end; }
   .item-actions .btn { flex: 1; justify-content: center; padding: 10px 12px; white-space: nowrap; }
 }
+
+/* ============================================================
+   Скролл-лок: когда открыто меню, фон не прокручивается
+   ============================================================ */
+html.no-scroll, body.no-scroll { overflow: hidden; }
+.modal-body { overscroll-behavior: contain; }
+.modal { overscroll-behavior: contain; }
+.palette-list { overscroll-behavior: contain; }
+.search-results { overscroll-behavior: contain; }
+
+/* ============================================================
+   Поиск по задачам и заметкам
+   ============================================================ */
+.search-modal { max-width: 640px; }
+.search-input-wrap {
+  flex: 1; display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  transition: border-color .12s var(--ease);
+}
+.search-input-wrap:focus-within { border-color: var(--border-strong); }
+.search-input-wrap svg { color: var(--muted); flex-shrink: 0; }
+.search-input-wrap input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  font-size: 16px; color: var(--text);
+}
+.search-input-wrap input::placeholder { color: var(--muted); }
+
+.search-hint {
+  color: var(--muted); font-size: 14px; text-align: center;
+  padding: 40px 12px; line-height: 1.6;
+}
+.search-hint kbd {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 7px; border-radius: var(--r-xs);
+  border: 1px solid var(--border); color: var(--text);
+  background: var(--surface-2);
+}
+
+.search-section {
+  font-family: var(--font-mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: 8px 0 8px;
+}
+.search-section:first-child { margin-top: 0; }
+
+.search-result {
+  display: flex; gap: 12px; align-items: flex-start;
+  width: 100%; text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  margin-bottom: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: border-color .12s var(--ease), background .12s var(--ease);
+}
+.search-result:last-child { margin-bottom: 0; }
+.search-result:hover, .search-result.active { border-color: var(--border-strong); background: var(--surface-2); }
+.search-result .sr-type {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--surface-3); color: var(--muted);
+  font-size: 12px; flex-shrink: 0; margin-top: 1px;
+}
+.search-result .sr-body { flex: 1; min-width: 0; }
+.search-result .sr-title { font-size: 15.5px; font-weight: 500; display: block; word-break: break-word; }
+.search-result .sr-title mark, .search-desc mark { background: var(--accent-soft); color: var(--accent); border-radius: 2px; }
+.search-desc {
+  font-size: 13.5px; color: var(--muted); margin-top: 3px; line-height: 1.5;
+  word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.search-result .sr-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+.search-result .sr-none { color: var(--muted); font-style: italic; }
+
 
 
 
