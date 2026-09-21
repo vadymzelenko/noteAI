@@ -17,6 +17,31 @@
     tada:'🎉', party:'🥳', clap:'👏', thumbsup:'👍', ok:'👌',
   };
 
+  // SVG-иконки (Feather-стиль) — используются вместо эмодзи в UI.
+  const ICONS = {
+    task: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+    note: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+    search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    swap: '<path d="M7 16V4M7 4L3 8M7 4l4 4"/><path d="M17 8v12M17 20l4-4M17 20l-4-4"/>',
+    metrics: '<path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/>',
+    drafts: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.37.5.62.91.62H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    account: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    ai: '<path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
+    add: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    total: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    bolt: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  };
+
+  function svgIcon(name, size = 16) {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+  }
+
   const state = {
     mode: 'tasks',
     theme: 'noir',
@@ -439,7 +464,7 @@
     return `
       <div class="quick-add-bar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
-        <input type="text" id="quickAddInput" placeholder="Попроси ИИ…">
+        <input type="text" id="quickAddInput" placeholder="Скажи ИИ, что добавить — «купить молоко завтра», «заметка про идею для проекта»…">
         <button class="btn primary sm" id="quickAddBtn">Добавить</button>
       </div>
     `;
@@ -550,7 +575,6 @@
         </div>
       </div>
 
-      ${renderQuickAddBar()}
 
       <div class="list">
         ${sortedActive.length ? sortedActive.map(renderTaskRow).join('') : '<div class="empty-state">Нет активных задач</div>'}
@@ -575,7 +599,6 @@
         </div>
       </div>
 
-      ${renderQuickAddBar()}
 
       <div class="list">
         ${sorted.length ? sorted.map(renderNoteRow).join('') : '<div class="empty-state">Пока нет заметок</div>'}
@@ -587,7 +610,7 @@
 
   function bindViewEvents() {
     const addBtn = document.getElementById('addBtn');
-    if (addBtn) addBtn.addEventListener('click', () => openEditor(null, state.mode === 'tasks' ? 'task' : 'note'));
+    if (addBtn) addBtn.addEventListener('click', openAddSheet);
 
     const quickAddBtn = document.getElementById('quickAddBtn');
     const quickAddInput = document.getElementById('quickAddInput');
@@ -779,10 +802,10 @@
 
     body.innerHTML = `
       <div class="metrics-grid">
-        <div class="metric"><div class="k">📝 Всего</div><div class="v">${total}</div></div>
-        <div class="metric"><div class="k">⚡ Активных</div><div class="v">${active}</div></div>
-        <div class="metric"><div class="k">⏰ Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div></div>
-        <div class="metric metric-ring"><div class="k">🎯 Готовность</div>${svgRing(pct)}</div>
+        <div class="metric"><div class="k">${svgIcon('total', 13)} Всего</div><div class="v">${total}</div></div>
+        <div class="metric"><div class="k">${svgIcon('bolt', 13)} Активных</div><div class="v">${active}</div></div>
+        <div class="metric"><div class="k">${svgIcon('clock', 13)} Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div></div>
+        <div class="metric metric-ring"><div class="k">${svgIcon('target', 13)} Готовность</div>${svgRing(pct)}</div>
       </div>
 
       <div class="metrics-section">
@@ -1686,6 +1709,40 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     renderAccountBody();
   }
 
+  /* --- Меню добавления (Задача / Заметка / ИИ) --- */
+  function openAddSheet() {
+    const o = document.getElementById('addSheet');
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+    setTimeout(() => document.getElementById('addAiInput')?.focus(), 80);
+  }
+
+  function closeAddSheet() {
+    const o = document.getElementById('addSheet');
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function bindAddSheet() {
+    const overlay = document.getElementById('addSheet');
+    const input = document.getElementById('addAiInput');
+    const sendBtn = document.getElementById('addAiSend');
+
+    document.getElementById('addTaskBtn').addEventListener('click', () => { closeAddSheet(); openEditor(null, 'task'); });
+    document.getElementById('addNoteBtn').addEventListener('click', () => { closeAddSheet(); openEditor(null, 'note'); });
+    document.getElementById('addSheetCancel').addEventListener('click', closeAddSheet);
+
+    const run = async () => {
+      const text = input.value.trim();
+      if (!text) return;
+      await runQuickAdd(text, sendBtn, input);
+      if (!input.value) closeAddSheet(); // успех очистил поле — закрываем
+    };
+    sendBtn.addEventListener('click', run);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAddSheet(); });
+  }
+
   /* ====================== КОМАНДНАЯ ПАЛИТРА (⌘/Ctrl+K) ====================== */
 
   let paletteIndex = 0;
@@ -1694,15 +1751,15 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
   function paletteCommands() {
     const signedIn = Auth.isSignedIn();
     return [
-      { id:'new-task', icon:'🆕', title:'Новая задача', hint:'задача', run: () => openEditor(null, 'task') },
-      { id:'new-note', icon:'📝', title:'Новая заметка', hint:'заметка', run: () => openEditor(null, 'note') },
-      { id:'mode', icon:'🔁', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : 'сейчас заметки', run: () => toggleMode() },
-      { id:'theme', icon:'🎨', title:'Сменить тему', hint: THEME_LABELS[state.theme] || state.theme, run: () => cycleTheme() },
-      { id:'metrics', icon:'📊', title:'Аналитика', hint:'статистика', run: () => openMetrics() },
-      { id:'drafts', icon:'🗂', title:'Черновики', hint:'несохранённые', run: () => openDrafts() },
-      { id:'trash', icon:'🗑', title:'Корзина', hint:'удалённые', run: () => openTrash() },
-      { id:'settings', icon:'⚙️', title:'Настройки', hint:'ИИ и email', run: () => openSettingsModal() },
-      { id:'account', icon:'👤', title: signedIn ? 'Аккаунт' : 'Войти', hint: signedIn ? (Auth.user?.email || 'аккаунт') : 'Google', run: () => openAccountModal() },
+      { id:'new-task', icon:'task', title:'Новая задача', hint:'задача', run: () => openEditor(null, 'task') },
+      { id:'new-note', icon:'note', title:'Новая заметка', hint:'заметка', run: () => openEditor(null, 'note') },
+      { id:'mode', icon:'swap', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : 'сейчас заметки', run: () => toggleMode() },
+      { id:'theme', icon:'theme', title:'Сменить тему', hint: THEME_LABELS[state.theme] || state.theme, run: () => cycleTheme() },
+      { id:'metrics', icon:'metrics', title:'Аналитика', hint:'статистика', run: () => openMetrics() },
+      { id:'drafts', icon:'drafts', title:'Черновики', hint:'несохранённые', run: () => openDrafts() },
+      { id:'trash', icon:'trash', title:'Корзина', hint:'удалённые', run: () => openTrash() },
+      { id:'settings', icon:'settings', title:'Настройки', hint:'ИИ и email', run: () => openSettingsModal() },
+      { id:'account', icon:'account', title: signedIn ? 'Аккаунт' : 'Войти', hint: signedIn ? (Auth.user?.email || 'аккаунт') : 'Google', run: () => openAccountModal() },
     ];
   }
 
@@ -1715,7 +1772,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
         .slice(0, 8)
         .map((x) => ({
           id: 'item-' + x.id,
-          icon: x.type === 'task' ? '✓' : '¶',
+          icon: x.type === 'task' ? 'task' : 'note',
           title: x.title || '(без названия)',
           hint: x.type === 'task' ? 'задача' : 'заметка',
           run: () => openEditor(x, x.type),
@@ -1739,12 +1796,12 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     if (cmds.length) {
       parts.push('<div class="palette-section">Команды</div>');
       cmds.forEach((c) => parts.push(
-        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico" style="width:18px;text-align:center;flex-shrink:0">${c.icon}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
+        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
     }
     if (items.length) {
       parts.push('<div class="palette-section">Записи</div>');
       items.forEach((c) => parts.push(
-        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico" style="width:18px;text-align:center;flex-shrink:0">${c.icon}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
+        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
     }
     if (!parts.length) parts.push('<div class="palette-empty">Ничего не найдено</div>');
     return parts.join('');
@@ -1841,7 +1898,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
         : '<div class="search-desc sr-none">Без текста</div>';
     return `
       <button class="search-result" data-open="${it.id}">
-        <span class="sr-type">${it.type === 'task' ? '✓' : '¶'}</span>
+        <span class="sr-type">${svgIcon(it.type === 'task' ? 'task' : 'note', 14)}</span>
         <span class="sr-body">
           <span class="sr-title">${highlightMatch(it.title || '(без названия)', needle)}</span>
           ${desc}
@@ -2075,10 +2132,11 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     bindNetwork();
     bindSearch();
     bindScrollLock();
+    bindAddSheet();
 
     document.getElementById('themeBtn').addEventListener('click', cycleTheme);
     document.getElementById('modeBtn').addEventListener('click', toggleMode);
-    document.getElementById('fabAdd').addEventListener('click', () => openEditor(null, state.mode === 'tasks' ? 'task' : 'note'));
+    document.getElementById('fabAdd').addEventListener('click', openAddSheet);
 
     render();
     registerSW();
