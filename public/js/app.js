@@ -21,7 +21,7 @@
     mode: 'tasks',
     theme: 'noir',
     items: [],
-    filter: { importance: 'all', category: 'all', query: '' },
+    filter: { importance: 'all', category: 'all', type: 'all', query: '' },
     filtersOpen: false,
     editingId: null,
     editingType: 'task',
@@ -249,6 +249,38 @@
     }, ms);
   }
 
+  /* --- Action sheet (iOS) для подтверждения действий --- */
+  function showActionSheet({ title, message, actionText, cancelText = 'Отмена' }) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'sheet-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.innerHTML = `
+        <div class="sheet">
+          ${title ? `<div class="sheet-title">${escapeHtml(title)}</div>` : ''}
+          ${message ? `<div class="sheet-message">${escapeHtml(message)}</div>` : ''}
+          <button class="sheet-btn sheet-danger" type="button">${escapeHtml(actionText)}</button>
+          <button class="sheet-btn sheet-cancel" type="button">${escapeHtml(cancelText)}</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('open'));
+      const done = (val) => {
+        overlay.classList.remove('open');
+        setTimeout(() => overlay.remove(), 220);
+        resolve(val);
+      };
+      overlay.querySelector('.sheet-danger').addEventListener('click', () => done(true));
+      overlay.querySelector('.sheet-cancel').addEventListener('click', () => done(false));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) done(false); });
+    });
+  }
+
+  function askConfirm({ title, message, actionText = 'Удалить' }) {
+    return showActionSheet({ title, message, actionText });
+  }
+
   async function loadItems() {
     if (!Auth.isSignedIn()) { state.items = []; return; }
     setSyncStatus('Загрузка…', 'busy');
@@ -407,7 +439,7 @@
     return `
       <div class="quick-add-bar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
-        <input type="text" id="quickAddInput" placeholder="Написать ИИ">
+        <input type="text" id="quickAddInput" placeholder="Скажи ИИ, что добавить — «купить молоко завтра», «заметка про идею для проекта»…">
         <button class="btn primary sm" id="quickAddBtn">Добавить</button>
       </div>
     `;
@@ -447,17 +479,22 @@
     const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
     const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 200))}</div>` : '';
     return `
-      <div class="item-row clickable ${it.done ? 'done' : ''}" data-id="${it.id}">
-        <span class="importance-dot ${it.importance || 'green'}"></span>
-        <div class="checkbox ${it.done ? 'checked' : ''}" data-toggle="${it.id}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      <div class="swipe-item" data-id="${it.id}">
+        <div class="swipe-actions">
+          <button class="swipe-delete" data-swipe-delete="${it.id}" aria-label="Удалить">Удалить</button>
         </div>
-        <div class="item-body">
-          <div class="item-title ${it.done ? 'done' : ''}">${escapeHtml(it.title || '(без названия)')}</div>
-          ${desc}
-          <div class="item-meta">
-            ${cat}${tags}
-            ${rem ? `<span class="${cls}">⏱ ${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>` : ''}
+        <div class="item-row clickable ${it.done ? 'done' : ''}" data-id="${it.id}">
+          <span class="importance-dot ${it.importance || 'green'}"></span>
+          <div class="checkbox ${it.done ? 'checked' : ''}" data-toggle="${it.id}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div class="item-body">
+            <div class="item-title ${it.done ? 'done' : ''}">${escapeHtml(it.title || '(без названия)')}</div>
+            ${desc}
+            <div class="item-meta">
+              ${cat}${tags}
+              ${rem ? `<span class="${cls}">⏱ ${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>` : ''}
+            </div>
           </div>
         </div>
       </div>
@@ -474,11 +511,16 @@
       return `<a class="mini-tag accent" data-ref="${r}" href="#">↗ ${escapeHtml(t.title || '(без названия)')}</a>`;
     }).join('');
     return `
-      <div class="item-row clickable" data-id="${it.id}">
-        <div class="item-body">
-          <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
-          ${desc}
-          <div class="item-meta">${cat}${tags}${refs}</div>
+      <div class="swipe-item" data-id="${it.id}">
+        <div class="swipe-actions">
+          <button class="swipe-delete" data-swipe-delete="${it.id}" aria-label="Удалить">Удалить</button>
+        </div>
+        <div class="item-row clickable" data-id="${it.id}">
+          <div class="item-body">
+            <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
+            ${desc}
+            <div class="item-meta">${cat}${tags}${refs}</div>
+          </div>
         </div>
       </div>
     `;
@@ -486,15 +528,11 @@
 
   function renderTasksView() {
     const activeTasks = state.items.filter((x) => x.type === 'task' && !hidden(x));
-    const filteredActive = applyFilter(state.items, 'task').filter((x) => !x.done);
-    const filteredDone = applyFilter(state.items, 'task').filter((x) => x.done);
-    const sortedActive = sortTasks(filteredActive);
-    const sortedDone = sortTasks(filteredDone);
+    const sortedActive = sortTasks(activeTasks.filter((x) => !x.done));
+    const sortedDone = sortTasks(activeTasks.filter((x) => x.done));
     const total = activeTasks.length;
     const done = activeTasks.filter((x) => x.done).length;
     const active = total - done;
-    const trashCount = state.items.filter(deleted).length;
-    const draftsCount = state.items.filter(draft).filter((x) => !deleted(x)).length;
 
     const completedSection = sortedDone.length ? `
       <div class="section-title">Выполнено · ${sortedDone.length}</div>
@@ -508,22 +546,11 @@
           <div class="view-sub">${active} активных · ${done} выполнено</div>
         </div>
         <div class="view-actions">
-          <button class="btn ghost sm filters-toggle ${state.filtersOpen ? 'open' : ''}" id="filtersToggle">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
-            Фильтры
-          </button>
-          <button class="btn ghost sm" id="metricsBtn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg>
-            Аналитика
-          </button>
-          <button class="btn ghost sm" id="draftsBtn">Черновики${draftsCount ? ' · ' + draftsCount : ''}</button>
-          <button class="btn ghost sm" id="trashBtn">Корзина${trashCount ? ' · ' + trashCount : ''}</button>
           <button class="btn primary" id="addBtn">+ Добавить</button>
         </div>
       </div>
 
       ${renderQuickAddBar()}
-      ${renderFiltersPanel()}
 
       <div class="list">
         ${sortedActive.length ? sortedActive.map(renderTaskRow).join('') : '<div class="empty-state">Нет активных задач</div>'}
@@ -535,9 +562,7 @@
 
   function renderNotesView() {
     const all = state.items.filter((x) => x.type === 'note' && !hidden(x));
-    const sorted = sortNotes(applyFilter(state.items, 'note'));
-    const trashCount = state.items.filter(deleted).length;
-    const draftsCount = state.items.filter(draft).filter((x) => !deleted(x)).length;
+    const sorted = sortNotes(all);
 
     return `
       <div class="view-head">
@@ -546,22 +571,11 @@
           <div class="view-sub">${all.length} записей</div>
         </div>
         <div class="view-actions">
-          <button class="btn ghost sm filters-toggle ${state.filtersOpen ? 'open' : ''}" id="filtersToggle">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
-            Фильтры
-          </button>
-          <button class="btn ghost sm" id="metricsBtn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg>
-            Аналитика
-          </button>
-          <button class="btn ghost sm" id="draftsBtn">Черновики${draftsCount ? ' · ' + draftsCount : ''}</button>
-          <button class="btn ghost sm" id="trashBtn">Корзина${trashCount ? ' · ' + trashCount : ''}</button>
           <button class="btn primary" id="addBtn">+ Добавить</button>
         </div>
       </div>
 
       ${renderQuickAddBar()}
-      ${renderFiltersPanel()}
 
       <div class="list">
         ${sorted.length ? sorted.map(renderNoteRow).join('') : '<div class="empty-state">Пока нет заметок</div>'}
@@ -575,12 +589,6 @@
     const addBtn = document.getElementById('addBtn');
     if (addBtn) addBtn.addEventListener('click', () => openEditor(null, state.mode === 'tasks' ? 'task' : 'note'));
 
-    const trashBtn = document.getElementById('trashBtn');
-    if (trashBtn) trashBtn.addEventListener('click', openTrash);
-
-    const draftsBtn = document.getElementById('draftsBtn');
-    if (draftsBtn) draftsBtn.addEventListener('click', openDrafts);
-
     const quickAddBtn = document.getElementById('quickAddBtn');
     const quickAddInput = document.getElementById('quickAddInput');
     if (quickAddBtn && quickAddInput) {
@@ -589,58 +597,93 @@
       quickAddInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
     }
 
-    const metricsBtn = document.getElementById('metricsBtn');
-    if (metricsBtn) metricsBtn.addEventListener('click', openMetrics);
-
-    const filtersToggle = document.getElementById('filtersToggle');
-    if (filtersToggle) {
-      filtersToggle.addEventListener('click', () => {
-        state.filtersOpen = !state.filtersOpen;
-        document.getElementById('filtersPanel').classList.toggle('open', state.filtersOpen);
-        filtersToggle.classList.toggle('open', state.filtersOpen);
-      });
-    }
-
-    document.querySelectorAll('.chip[data-imp]').forEach((c) => {
-      c.addEventListener('click', () => { state.filter.importance = c.dataset.imp; render(); });
-    });
-    const catSel = document.getElementById('filterCategory');
-    if (catSel) catSel.addEventListener('change', () => { state.filter.category = catSel.value; render(); });
-
-    const q = document.getElementById('filterQuery');
-    if (q) q.addEventListener('input', () => {
-      state.filter.query = q.value;
-      const root = document.getElementById('viewRoot');
-      const list = root.querySelector('.list');
-      if (!list) return;
-      if (state.mode === 'tasks') {
-        const activeFiltered = sortTasks(applyFilter(state.items, 'task').filter((x) => !x.done));
-        const doneFiltered = sortTasks(applyFilter(state.items, 'task').filter((x) => x.done));
-        list.innerHTML = activeFiltered.length ? activeFiltered.map(renderTaskRow).join('') : '<div class="empty-state">Нет активных задач</div>';
-        let doneSection = root.querySelector('.section-title');
-        let doneList = doneSection ? doneSection.nextElementSibling : null;
-        if (doneFiltered.length) {
-          if (!doneSection) {
-            const wrap = document.createElement('div');
-            wrap.innerHTML = `<div class="section-title">Выполнено · ${doneFiltered.length}</div><div class="list">${doneFiltered.map(renderTaskRow).join('')}</div>`;
-            root.appendChild(wrap);
-          } else {
-            doneSection.textContent = `Выполнено · ${doneFiltered.length}`;
-            doneList.innerHTML = doneFiltered.map(renderTaskRow).join('');
-          }
-        } else if (doneSection) {
-          doneSection.remove();
-          if (doneList) doneList.remove();
-        }
-        bindRowEvents(root);
-      } else {
-        const notes = sortNotes(applyFilter(state.items, 'note'));
-        list.innerHTML = notes.length ? notes.map(renderNoteRow).join('') : '<div class="empty-state">Пока нет заметок</div>';
-        bindRowEvents(root);
-      }
-    });
-
     bindRowEvents(document.getElementById('viewRoot'));
+  }
+
+  /* ====================== SWIPE-TO-DELETE ====================== */
+
+  const SWIPE_WIDTH = 84;
+
+  function closeAllSwipes(except) {
+    document.querySelectorAll('.swipe-item.open').forEach((el) => {
+      if (el === except) return;
+      el.classList.remove('open');
+      const c = el.querySelector('.item-row');
+      if (c) c.style.transform = '';
+    });
+  }
+
+  function openSwipe(el) {
+    closeAllSwipes(el);
+    el.classList.add('open');
+    const c = el.querySelector('.item-row');
+    if (c) c.style.transform = `translateX(-${SWIPE_WIDTH}px)`;
+  }
+
+  function closeSwipe(el) {
+    el.classList.remove('open');
+    const c = el.querySelector('.item-row');
+    if (c) c.style.transform = '';
+  }
+
+  function bindSwipe(scope) {
+    scope.querySelectorAll('.swipe-item').forEach((el) => {
+      if (el.dataset.swipeBound) return;
+      el.dataset.swipeBound = '1';
+      const content = el.querySelector('.item-row');
+      let startX = null, startY = null, dragging = false, baseX = 0, lastX = 0;
+
+      el.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        dragging = false;
+        baseX = el.classList.contains('open') ? -SWIPE_WIDTH : 0;
+        lastX = baseX;
+        closeAllSwipes(el);
+      }, { passive: true });
+
+      el.addEventListener('touchmove', (e) => {
+        if (startX === null) return;
+        const dx = e.touches[0].clientX - startX;
+        const dy = e.touches[0].clientY - startY;
+        if (!dragging) {
+          if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+          if (Math.abs(dy) > Math.abs(dx)) { startX = null; return; }
+          dragging = true;
+        }
+        e.preventDefault();
+        lastX = Math.max(-SWIPE_WIDTH - 8, Math.min(0, baseX + dx));
+        content.style.transform = `translateX(${lastX}px)`;
+      }, { passive: false });
+
+      el.addEventListener('touchend', () => {
+        if (startX === null) return;
+        const wasDragging = dragging;
+        startX = null; dragging = false;
+        if (!wasDragging) return;
+        if (lastX < -40) openSwipe(el); else closeSwipe(el);
+      });
+
+      el.querySelector('.swipe-delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = el.dataset.id;
+        const it = state.items.find((x) => x.id === id);
+        if (!it) return;
+        const ok = await askConfirm({
+          title: 'Удалить?',
+          message: `«${it.title || 'Без названия'}» будет перемещена в корзину на 14 дней.`,
+          actionText: 'Удалить',
+        });
+        if (ok) {
+          await softDeleteItem(id);
+          toast('Перемещено в корзину', 'info');
+          render();
+        } else {
+          closeSwipe(el);
+        }
+      });
+    });
   }
 
   function bindRowEvents(scope) {
@@ -666,6 +709,8 @@
       el.addEventListener('click', (e) => {
         if (e.target.closest('.checkbox')) return;
         if (e.target.closest('a.ref, a.mini-tag')) return;
+        const sw = el.closest('.swipe-item');
+        if (sw && sw.classList.contains('open')) { closeSwipe(sw); return; }
         const it = state.items.find((x) => x.id === el.dataset.id);
         if (it) openEditor(it, it.type);
       });
@@ -679,6 +724,8 @@
         if (it) openEditor(it, it.type);
       });
     });
+
+    bindSwipe(scope);
   }
 
   /* ====================== АНАЛИТИКА ====================== */
@@ -732,10 +779,10 @@
 
     body.innerHTML = `
       <div class="metrics-grid">
-        <div class="metric"><div class="k">Всего</div><div class="v">${total}</div></div>
-        <div class="metric"><div class="k">Активных</div><div class="v">${active}</div></div>
-        <div class="metric"><div class="k">Просрочено</div><div class="v err">${overdue}</div></div>
-        <div class="metric"><div class="k">Готовность</div><div class="v ok">${pct}%</div></div>
+        <div class="metric"><div class="k">📝 Всего</div><div class="v">${total}</div></div>
+        <div class="metric"><div class="k">⚡ Активных</div><div class="v">${active}</div></div>
+        <div class="metric"><div class="k">⏰ Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div></div>
+        <div class="metric metric-ring"><div class="k">🎯 Готовность</div>${svgRing(pct)}</div>
       </div>
 
       <div class="metrics-section">
@@ -807,6 +854,21 @@
     });
     out += `<line class="chart-axis" x1="${padX}" y1="${H-padBot}" x2="${W-padX}" y2="${H-padBot}"/>`;
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${out}</svg>`;
+  }
+
+  function svgRing(pct) {
+    const R = 26, C = 2 * Math.PI * R;
+    const off = C * (1 - Math.max(0, Math.min(100, pct)) / 100);
+    return `
+      <div class="ring-wrap">
+        <svg width="62" height="62" viewBox="0 0 62 62">
+          <circle cx="31" cy="31" r="${R}" fill="none" stroke="var(--surface-3)" stroke-width="6"/>
+          <circle cx="31" cy="31" r="${R}" fill="none" stroke="var(--ok)" stroke-width="6" stroke-linecap="round"
+            stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 31 31)"/>
+        </svg>
+        <span class="ring-val">${pct}%</span>
+      </div>
+    `;
   }
 
   function svgDonut(segments) {
@@ -1131,7 +1193,11 @@
 
   async function deleteFromEditor() {
     if (!state.editingId) { closeEditor(); return; }
-    if (!confirm('Переместить в корзину? Восстановить можно 14 дней.')) return;
+    if (!(await askConfirm({
+      title: 'Переместить в корзину?',
+      message: 'Восстановить можно в течение 14 дней.',
+      actionText: 'В корзину',
+    }))) return;
     await softDeleteItem(state.editingId);
     closeEditor();
     render();
@@ -1238,7 +1304,7 @@
     });
     list.querySelectorAll('[data-purge]').forEach((b) => {
       b.addEventListener('click', async () => {
-        if (!confirm('Удалить навсегда?')) return;
+        if (!(await askConfirm({ title: 'Удалить навсегда?', message: 'Это действие нельзя отменить.', actionText: 'Удалить' }))) return;
         await purgeItem(b.dataset.purge);
         renderTrashList(); render(); toast('Удалено навсегда', 'info');
       });
@@ -1248,7 +1314,7 @@
     document.getElementById('trashClose').addEventListener('click', closeTrash);
     // Закрытие только по крестику — клик по фону больше не закрывает окно.
     document.getElementById('trashEmptyBtn').addEventListener('click', async () => {
-      if (!confirm('Очистить корзину полностью?')) return;
+      if (!(await askConfirm({ title: 'Очистить корзину?', message: 'Все записи будут удалены безвозвратно.', actionText: 'Очистить' }))) return;
       const all = state.items.filter(deleted);
       for (const it of all) await purgeItem(it.id);
       renderTrashList(); render();
@@ -1308,7 +1374,7 @@
     });
     list.querySelectorAll('[data-delete-draft]').forEach((b) => {
       b.addEventListener('click', async () => {
-        if (!confirm('Удалить черновик безвозвратно?')) return;
+        if (!(await askConfirm({ title: 'Удалить черновик?', message: 'Действие нельзя отменить.', actionText: 'Удалить' }))) return;
         await purgeItem(b.dataset.deleteDraft);
         renderDraftsList(); render();
       });
@@ -1318,7 +1384,7 @@
     document.getElementById('draftsClose').addEventListener('click', closeDrafts);
     // Закрытие только по крестику — клик по фону больше не закрывает окно.
     document.getElementById('draftsEmptyBtn').addEventListener('click', async () => {
-      if (!confirm('Удалить все черновики безвозвратно?')) return;
+      if (!(await askConfirm({ title: 'Удалить все черновики?', message: 'Действие нельзя отменить.', actionText: 'Удалить' }))) return;
       const all = state.items.filter((x) => draft(x) && !deleted(x));
       for (const it of all) await purgeItem(it.id);
       renderDraftsList(); render();
@@ -1381,7 +1447,7 @@
     if (forgetBtn) {
       forgetBtn.addEventListener('click', async () => {
         if (!Auth.isSignedIn()) { setStatus('aiStatus', 'Не авторизован', 'err'); return; }
-        if (!confirm('Удалить сохранённый на аккаунте ключ ИИ?')) return;
+        if (!(await askConfirm({ title: 'Удалить ключ ИИ?', message: 'Настройки ИИ, сохранённые в аккаунте, будут удалены.', actionText: 'Удалить' }))) return;
         try {
           await AI.clearCloud();
           setStatus('aiStatus', 'Удалено с аккаунта', 'ok');
@@ -1394,18 +1460,11 @@
     document.getElementById('metricsClose').addEventListener('click', closeMetrics);
     // Закрытие только по крестику — клик по фону больше не закрывает окно.
 
-    document.getElementById('settingsBtn').addEventListener('click', () => {
-      overlay.classList.add('open');
-      overlay.setAttribute('aria-hidden', 'false');
-      refreshAiSettingsForm();
-      const rememberEl = document.getElementById('aiRemember');
-      const rememberRow = document.getElementById('aiRememberRow');
-      if (rememberEl) rememberEl.checked = false;
-      if (rememberRow) rememberRow.hidden = !Auth.isSignedIn();
-      setStatus('aiStatus', '', '');
-      refreshEmailSettingsForm();
-      setStatus('emailStatus', '', '');
-    });
+    document.getElementById('settingsBtn').addEventListener('click', openSettingsModal);
+
+    document.getElementById('navMetrics').addEventListener('click', () => { closeSettingsModal(); openMetrics(); });
+    document.getElementById('navDrafts').addEventListener('click', () => { closeSettingsModal(); openDrafts(); });
+    document.getElementById('navTrash').addEventListener('click', () => { closeSettingsModal(); openTrash(); });
 
     bindEmailSettings();
   }
@@ -1602,6 +1661,22 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     setStatus('aiStatus', '', '');
     refreshEmailSettingsForm();
     setStatus('emailStatus', '', '');
+    refreshSettingsNav();
+  }
+
+  function closeSettingsModal() {
+    const overlay = document.getElementById('settingsOverlay');
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+
+  function refreshSettingsNav() {
+    const draftsCount = state.items.filter((x) => draft(x) && !deleted(x)).length;
+    const trashCount = state.items.filter(deleted).length;
+    const d = document.getElementById('navDraftsCount');
+    const t = document.getElementById('navTrashCount');
+    if (d) { d.textContent = draftsCount; d.hidden = !draftsCount; }
+    if (t) { t.textContent = trashCount; t.hidden = !trashCount; }
   }
 
   function openAccountModal() {
@@ -1779,18 +1854,23 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
   function renderSearch(q) {
     const body = document.getElementById('searchBody');
     const needle = q.trim().toLowerCase();
-    if (!needle) {
-      body.innerHTML = '<div class="search-hint">Начни вводить — ищу сразу по заголовкам, тексту и тегам.<br>Переход между результатами — <kbd>↑</kbd> <kbd>↓</kbd>, открыть — <kbd>Enter</kbd></div>';
+    const type = state.filter.type;
+    const imp = state.filter.importance;
+    const cat = state.filter.category;
+
+    const matchesType = (x) => type === 'all' || x.type === type;
+    const matchesImp = (x) => x.type !== 'task' || imp === 'all' || x.importance === imp;
+    const matchesCat = (x) => cat === 'all' || (x.category || '') === cat;
+    const matchesQuery = (x) => !needle || ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle);
+
+    if (!needle && type === 'all' && imp === 'all' && cat === 'all') {
+      body.innerHTML = '<div class="search-hint">Начни вводить — ищу сразу по заголовкам, тексту и тегам.<br>Или задай фильтры выше.<br>Переход между результатами — <kbd>↑</kbd> <kbd>↓</kbd>, открыть — <kbd>Enter</kbd></div>';
       return;
     }
-    const tasks = state.items
-        .filter((x) => x.type === 'task' && !hidden(x))
-        .filter((x) => ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle))
-        .sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity));
-    const notes = state.items
-        .filter((x) => x.type === 'note' && !hidden(x))
-        .filter((x) => ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle))
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+    const allMatches = state.items.filter((x) => !hidden(x) && matchesType(x) && matchesImp(x) && matchesCat(x) && matchesQuery(x));
+    const tasks = allMatches.filter((x) => x.type === 'task').sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity));
+    const notes = allMatches.filter((x) => x.type === 'note').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
     const parts = [];
     if (tasks.length) {
@@ -1820,6 +1900,8 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     o.setAttribute('aria-hidden', 'false');
     const input = document.getElementById('searchInput');
     input.value = '';
+    populateSearchCategories();
+    syncSearchFilters();
     renderSearch('');
     setTimeout(() => input.focus(), 60);
   }
@@ -1830,11 +1912,51 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     o.setAttribute('aria-hidden', 'true');
   }
 
+  function populateSearchCategories() {
+    const sel = document.getElementById('searchCategory');
+    if (!sel) return;
+    const cats = new Set();
+    state.items.forEach((it) => { if (!hidden(it) && it.category) cats.add(it.category); });
+    const prev = sel.value;
+    sel.innerHTML = '<option value="all">Все категории</option>' +
+        [...cats].sort().map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    if (prev) sel.value = prev;
+  }
+
+  function syncSearchFilters() {
+    document.querySelectorAll('#searchType button').forEach((x) => x.classList.toggle('active', x.dataset.type === state.filter.type));
+    document.querySelectorAll('#searchImportance .chip').forEach((x) => x.classList.toggle('active', x.dataset.imp === state.filter.importance));
+    document.getElementById('searchImportance').style.display = state.filter.type === 'note' ? 'none' : '';
+    document.getElementById('searchCategory').value = state.filter.category;
+  }
+
   function bindSearch() {
     document.getElementById('searchBtn').addEventListener('click', openSearch);
     document.getElementById('searchClose').addEventListener('click', closeSearch);
     const input = document.getElementById('searchInput');
     input.addEventListener('input', () => renderSearch(input.value));
+
+    // Фильтры поиска: тип / важность / категория
+    document.querySelectorAll('#searchType button').forEach((b) => {
+      b.addEventListener('click', () => {
+        state.filter.type = b.dataset.type;
+        document.querySelectorAll('#searchType button').forEach((x) => x.classList.toggle('active', x === b));
+        document.getElementById('searchImportance').style.display = state.filter.type === 'note' ? 'none' : '';
+        renderSearch(input.value);
+      });
+    });
+    document.querySelectorAll('#searchImportance .chip').forEach((c) => {
+      c.addEventListener('click', () => {
+        state.filter.importance = c.dataset.imp;
+        document.querySelectorAll('#searchImportance .chip').forEach((x) => x.classList.toggle('active', x === c));
+        renderSearch(input.value);
+      });
+    });
+    document.getElementById('searchCategory').addEventListener('change', (e) => {
+      state.filter.category = e.target.value;
+      renderSearch(input.value);
+    });
+
     input.addEventListener('keydown', (e) => {
       const items = [...document.querySelectorAll('#searchBody .search-result')];
       if (e.key === 'ArrowDown') {
@@ -1863,15 +1985,12 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
   /* ====================== СКРОЛЛ-ЛОК ФОНА ====================== */
 
   function bindScrollLock() {
-    const overlays = document.querySelectorAll('.modal-overlay, .palette-overlay');
     const update = () => {
-      const anyOpen = !!document.querySelector('.modal-overlay.open, .palette-overlay.open');
+      const anyOpen = !!document.querySelector('.modal-overlay.open, .palette-overlay.open, .sheet-overlay.open');
       document.documentElement.classList.toggle('no-scroll', anyOpen);
       document.body.classList.toggle('no-scroll', anyOpen);
     };
-    overlays.forEach((el) => {
-      new MutationObserver(update).observe(el, { attributes: true, attributeFilter: ['class'] });
-    });
+    new MutationObserver(update).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'], childList: true });
     update();
   }
 

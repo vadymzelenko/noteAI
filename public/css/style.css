@@ -833,6 +833,15 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 .metric .v.err { color: var(--err); }
 .metric .v.warn { color: var(--warn); }
 .metric .v.ok { color: var(--ok); }
+.metric { transition: background .12s var(--ease); }
+.metric:hover { background: var(--surface-2); }
+.metric-ring { display: flex; flex-direction: column; }
+.ring-wrap { position: relative; display: grid; place-items: center; margin-top: 4px; }
+.ring-wrap svg { display: block; }
+.ring-val {
+  position: absolute; font-size: 14px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
 
 .metrics-section { margin-bottom: 22px; }
 .metrics-section-head {
@@ -860,8 +869,8 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   gap: 14px;
 }
 
-.chart-bar { fill: var(--text); }
-.chart-bar.dim { fill: var(--muted); opacity: .3; }
+.chart-bar { fill: var(--accent); opacity: .85; }
+.chart-bar.dim { fill: var(--muted); opacity: .25; }
 .chart-label {
   fill: var(--muted);
   font-family: var(--font-mono);
@@ -982,7 +991,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
      переносятся по 2 в ряд, а «+Добавить» — отдельной полноширинной строкой. */
   .view-actions { width: 100%; display: flex; flex-wrap: wrap; gap: 8px; }
   .view-actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; padding: 10px 10px; white-space: nowrap; }
-  .view-actions .btn#addBtn { order: -1; flex-basis: 100%; }
+  .view-actions .btn#addBtn { display: none; }
 
   .form-grid { grid-template-columns: 1fr; }
   .field.span-2, .field-refs { grid-column: span 1; }
@@ -1017,7 +1026,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
     border-radius: 0;
     border-left: none; border-right: none; border-bottom: none;
   }
-  .modal-head { padding: 14px 14px calc(14px + env(safe-area-inset-top, 0px)) 14px; }
+  .modal-head { padding: calc(14px + env(safe-area-inset-top, 0px)) 14px 14px 14px; }
   .modal-body { padding: 18px 16px; }
   .modal-foot {
     padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
@@ -1374,6 +1383,25 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 }
 
 /* ============================================================
+   Навигация в настройках (данные и аналитика)
+   ============================================================ */
+.settings-nav {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-bottom: 22px;
+}
+.settings-nav .btn { justify-content: center; gap: 7px; }
+.settings-nav .nav-ico { font-size: 15px; }
+.badge {
+  font-family: var(--font-mono); font-size: 11px;
+  background: var(--accent-soft); color: var(--accent);
+  padding: 1px 7px; border-radius: var(--r-pill);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 720px) {
+  .settings-nav { grid-template-columns: 1fr; }
+}
+
+/* ============================================================
    Скролл-лок: когда открыто меню, фон не прокручивается
    ============================================================ */
 html.no-scroll, body.no-scroll { overflow: hidden; }
@@ -1401,6 +1429,19 @@ html.no-scroll, body.no-scroll { overflow: hidden; }
   font-size: 16px; color: var(--text);
 }
 .search-input-wrap input::placeholder { color: var(--muted); }
+
+.search-filters {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.search-filters .segmented { flex-shrink: 0; }
+.search-filters-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.search-filters .select-sm { min-width: 150px; }
+@media (max-width: 720px) {
+  .search-filters { padding: 10px 14px; gap: 6px; }
+  .search-filters .select-sm { flex: 1; min-width: 0; }
+}
 
 .search-hint {
   color: var(--muted); font-size: 14px; text-align: center;
@@ -1451,6 +1492,88 @@ html.no-scroll, body.no-scroll { overflow: hidden; }
 }
 .search-result .sr-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
 .search-result .sr-none { color: var(--muted); font-style: italic; }
+
+/* ============================================================
+   Swipe-to-delete (iOS)
+   ============================================================ */
+.swipe-item {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-md);
+}
+.swipe-item .item-row {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  border-radius: 0;
+  background: var(--surface);
+  transition: transform .18s var(--ease-out), border-color .12s var(--ease), background .12s var(--ease);
+  touch-action: pan-y;
+}
+.swipe-actions {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: 84px;
+  display: flex;
+}
+.swipe-delete {
+  flex: 1;
+  border: none;
+  background: var(--err);
+  color: #fff;
+  font-size: 14px; font-weight: 600;
+  display: grid; place-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.swipe-item.open .item-row { transform: translateX(-84px); }
+
+/* ============================================================
+   Action sheet (iOS) — подтверждение удаления
+   ============================================================ */
+.sheet-overlay {
+  position: fixed; inset: 0; z-index: 130;
+  background: rgba(0,0,0,.45);
+  display: flex; align-items: flex-end; justify-content: center;
+  padding: 12px;
+  opacity: 0;
+  transition: opacity .18s var(--ease);
+}
+.sheet-overlay.open { opacity: 1; }
+.sheet {
+  width: 100%; max-width: 420px;
+  background: var(--surface-2);
+  border-radius: var(--r-xl);
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 8px;
+  transform: translateY(16px);
+  transition: transform .22s var(--ease-out);
+}
+.sheet-overlay.open .sheet { transform: translateY(0); }
+.sheet-title {
+  text-align: center; font-weight: 600; font-size: 15px;
+  padding: 10px 8px 0; letter-spacing: var(--track-tight);
+}
+.sheet-message {
+  text-align: center; color: var(--muted); font-size: 13px;
+  padding: 0 8px 4px; line-height: 1.5;
+}
+.sheet-btn {
+  width: 100%; padding: 15px;
+  border: none; border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px; font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  transition: background .12s var(--ease);
+}
+.sheet-btn:hover { background: var(--surface-3); }
+.sheet-btn.sheet-danger { color: var(--err); font-weight: 600; }
+.sheet-btn.sheet-cancel { font-weight: 600; }
+@media (max-width: 720px) {
+  .sheet-overlay { padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
+}
+
 
 
 

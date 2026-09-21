@@ -200,6 +200,12 @@
     </header>
 
     <div class="modal-body">
+      <div class="settings-nav">
+        <button class="btn" id="navMetrics"><span class="nav-ico">📊</span>Аналитика</button>
+        <button class="btn" id="navDrafts"><span class="nav-ico">🗂</span>Черновики<span class="badge" id="navDraftsCount" hidden></span></button>
+        <button class="btn" id="navTrash"><span class="nav-ico">🗑</span>Корзина<span class="badge" id="navTrashCount" hidden></span></button>
+      </div>
+
       <p class="hint">Ключ хранится на этом устройстве. Запросы идут напрямую в провайдера. Ниже можно необязательно сохранить настройки (включая ключ) в аккаунт, чтобы не вводить их заново на другом устройстве.</p>
 
       <div class="form-grid">
@@ -333,6 +339,20 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </header>
+    <div class="search-filters" id="searchFilters">
+      <div class="segmented" id="searchType">
+        <button data-type="all" class="active">Все</button>
+        <button data-type="task">Задачи</button>
+        <button data-type="note">Заметки</button>
+      </div>
+      <div class="search-filters-row" id="searchImportance">
+        <button class="chip active" data-imp="all">Все</button>
+        <button class="chip" data-imp="red"><span class="dot" style="background:var(--err)"></span>Важно</button>
+        <button class="chip" data-imp="yellow"><span class="dot" style="background:var(--warn)"></span>Средне</button>
+        <button class="chip" data-imp="green"><span class="dot" style="background:var(--ok)"></span>Не срочно</button>
+      </div>
+      <select class="select-sm" id="searchCategory"><option value="all">Все категории</option></select>
+    </div>
     <div class="modal-body search-results" id="searchBody"></div>
   </div>
 </div>
