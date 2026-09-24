@@ -1831,6 +1831,13 @@ html.no-scroll, body.no-scroll { overflow: hidden; }
   font-size: 15px; font-weight: 600;
   padding: 3px 6px; border-radius: var(--r-xs);
   outline: none;
+
+/* ============================================================
+   Настройки: вкладки
+   ============================================================ */
+.settings-tabs { margin-bottom: 18px; width: 100%; }
+.settings-tab[hidden] { display: none !important; }
+
 }
 .link-title-input:hover, .link-title-input:focus {
   border-color: var(--border); background: var(--surface);

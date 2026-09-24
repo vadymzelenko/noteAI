@@ -48,7 +48,7 @@
 
       <button class="btn ghost sm" id="modeBtn" title="Сменить режим">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-<!--        <span id="modeLabel">Задачи</span>-->
+        <span id="modeLabel">Задачи</span>
       </button>
 
       <button class="btn ghost sm" id="settingsBtn" title="Настройки">
@@ -145,8 +145,6 @@
         <button type="button" class="tool" data-md="table" title="Таблица" aria-label="Таблица"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
         <button type="button" class="tool" data-md="chart" title="График" aria-label="График"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="7" width="3" height="10" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/></svg></button>
         <button type="button" class="tool" data-md="image" title="Изображение" aria-label="Изображение"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
-
-        <button type="button" class="tool" id="emojiBtn" title="Эмодзи" aria-label="Эмодзи"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
         <button type="button" class="tool ai-tool" id="aiPanelToggle" title="ИИ-помощник">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
         </button>
@@ -198,13 +196,23 @@
     </header>
 
     <div class="modal-body">
-      <div class="settings-nav">
-        <button class="btn" id="navMetrics"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg></span>Аналитика</button>
-        <button class="btn" id="navLinks"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>Ссылки<span class="badge" id="navLinksCount" hidden></span></button>
-
-        <button class="btn" id="navDrafts"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>Черновики<span class="badge" id="navDraftsCount" hidden></span></button>
-        <button class="btn" id="navTrash"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>Корзина<span class="badge" id="navTrashCount" hidden></span></button>
+      <div class="segmented settings-tabs" id="settingsTabs">
+        <button type="button" class="active" data-settings-tab="ai">ИИ</button>
+        <button type="button" data-settings-tab="email">Email</button>
+        <button type="button" data-settings-tab="sections">Разделы</button>
       </div>
+
+      <div class="settings-tab" id="settingsTab-sections" hidden>
+        <p class="hint">Быстрый переход к разделам приложения.</p>
+        <div class="settings-nav">
+          <button class="btn" id="navMetrics"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg></span>Аналитика</button>
+          <button class="btn" id="navLinks"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>Ссылки<span class="badge" id="navLinksCount" hidden></span></button>
+          <button class="btn" id="navDrafts"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>Черновики<span class="badge" id="navDraftsCount" hidden></span></button>
+          <button class="btn" id="navTrash"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>Корзина<span class="badge" id="navTrashCount" hidden></span></button>
+        </div>
+      </div>
+
+      <div class="settings-tab" id="settingsTab-ai">
 
       <p class="hint">Достаточно вставить <b>Base URL</b> и <b>модель</b> (например, OpenRouter). API-ключ нужен, если провайдер его требует. Запросы идут напрямую по OpenAI-совместимому API. Ниже можно сохранить настройки в аккаунт, чтобы не вводить их заново на другом устройстве.</p>
 
@@ -234,9 +242,9 @@
         <button class="btn ghost" id="aiForget">Забыть на аккаунте</button>
       </div>
       <div class="status" id="aiStatus">ИИ выключен</div>
+      </div>
 
-      <hr style="border-color:var(--border);margin:20px 0">
-
+      <div class="settings-tab" id="settingsTab-email" hidden>
       <h3 style="margin:0 0 4px;font-size:14px">Email-напоминания</h3>
       <p class="hint">Для задач с красной важностью пришлём письмо за час до дедлайна, пока вкладка открыта. Отправка идёт через Gmail сервера — сюда попадает только адрес получателя.</p>
 
@@ -256,6 +264,7 @@
         <button class="btn" id="emailTest">Отправить тест</button>
       </div>
       <div class="status" id="emailStatus"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -311,64 +320,6 @@
   </div>
 </div>
 
-<!-- ================= Ссылки (закладки) ================= -->
-<div class="modal-overlay" id="linksOverlay" aria-hidden="true" role="dialog" aria-modal="true">
-  <div class="modal" style="max-width:760px">
-    <header class="modal-head">
-      <h2 class="modal-title">Ссылки</h2>
-      <div class="modal-head-actions">
-        <button class="btn sm ghost" id="linksSyncBtn" title="Сохранить в аккаунт">Синхр.</button>
-        <button class="icon-btn" id="linksClose" title="Закрыть" aria-label="Закрыть"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-      </div>
-    </header>
-    <div class="modal-body links-body">
-      <div class="links-toolbar">
-        <div class="links-search">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="linksSearch" placeholder="Поиск по ссылке, тегу, домену…" autocomplete="off">
-        </div>
-        <select class="select-sm" id="linksGroupFilter"><option value="">Все группы</option></select>
-        <select class="select-sm" id="linksDomainFilter"><option value="">Все домены</option></select>
-        <select class="select-sm" id="linksSort">
-          <option value="domain">По домену</option>
-          <option value="date">По дате</option>
-          <option value="title">По названию</option>
-        </select>
-      </div>
-
-      <div class="links-add-row">
-        <input type="text" id="linksAddUrl" placeholder="https://… — вставь ссылку" autocomplete="off">
-        <input type="text" id="linksAddTitle" placeholder="Название (необязательно)" autocomplete="off">
-        <select class="select-sm" id="linksAddGroup"><option value="">Без группы</option></select>
-        <button class="btn primary" id="linksAddBtn">Добавить</button>
-      </div>
-
-      <div class="links-groups">
-        <span class="field-label">Группы</span>
-        <div class="group-chips" id="linksGroups"></div>
-        <div class="group-add">
-          <input type="text" id="linksNewGroup" placeholder="Новая группа…" autocomplete="off">
-          <button class="btn sm" id="linksAddGroupBtn">+</button>
-        </div>
-      </div>
-
-      <details class="links-blocklist">
-        <summary>Фильтр: какие ссылки НЕ сохранять</summary>
-        <div class="blocklist-add">
-          <input type="text" id="linksBlockInput" placeholder="домен (example.com) или целый URL" autocomplete="off">
-          <button class="btn sm" id="linksBlockAdd">Заблокировать</button>
-        </div>
-        <div class="blocklist-chips" id="linksBlocklist"></div>
-      </details>
-
-      <div class="links-list" id="linksList"></div>
-    </div>
-  </div>
-</div>
-
-
-<!-- Emoji popover -->
-<div class="popover" id="emojiPopover" hidden></div>
 
 <!-- Тост-уведомления -->
 <div class="toast-stack" id="toastStack" role="status" aria-live="polite"></div>
@@ -428,6 +379,11 @@
         <span class="add-option-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
         <span class="add-option-text"><strong>Заметка</strong><small>Текст, markdown, ссылки</small></span>
       </button>
+      <button class="add-option" id="addLinkBtn" style="grid-column:span 2">
+        <span class="add-option-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+        <span class="add-option-text"><strong>Ссылка</strong><small>Добавить в закладки</small></span>
+      </button>
+
     </div>
     <div class="add-ai">
       <div class="add-ai-head"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg> Добавить через ИИ</div>

@@ -6,17 +6,6 @@
   const THEME_LABELS = { noir:'Noir', snow:'Snow', graphite:'Graphite', azure:'Azure', violet:'Violet', sage:'Sage' };
   const TRASH_TTL = 14 * 24 * 60 * 60 * 1000;
 
-  const EMOJI = {
-    smile:'😄', laugh:'😂', wink:'😉', cool:'😎', think:'🤔',
-    heart:'❤️', fire:'🔥', star:'⭐', sparkles:'✨', boom:'💥',
-    check:'✅', cross:'❌', warn:'⚠️', info:'ℹ️', question:'❓',
-    idea:'💡', rocket:'🚀', target:'🎯', trophy:'🏆', medal:'🏅',
-    code:'💻', bug:'🐛', book:'📚', memo:'📝', pin:'📌',
-    chart:'📊', graph:'📈', calendar:'📅', clock:'⏰', bell:'🔔',
-    lock:'🔒', key:'🔑', link:'🔗', package:'📦', gear:'⚙️',
-    tada:'🎉', party:'🥳', clap:'👏', thumbsup:'👍', ok:'👌',
-  };
-
   // SVG-иконки (Feather-стиль) — используются вместо эмодзи в UI.
   const ICONS = {
     task: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
@@ -94,8 +83,6 @@
 
   /* ====================== MARKDOWN ====================== */
 
-  const renderEmoji = (t) => t.replace(/:([a-z0-9_+-]+):/gi, (m, n) => EMOJI[n.toLowerCase()] || m);
-
   function highlightCode(code, lang) {
     const cls = 'language-' + (lang || 'plain');
     if (window.Prism && lang && Prism.languages[lang]) {
@@ -149,7 +136,7 @@
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-    return renderEmoji(s);
+    return s;
   }
 
   function renderBody(text) {
@@ -457,10 +444,10 @@
   }
   function updateModeButton() {
     const el = document.getElementById('modeLabel');
-    if (el) el.textContent = state.mode === 'tasks' ? 'Задачи' : 'Заметки';
+    if (el) el.textContent = state.mode === 'tasks' ? 'Задачи' : state.mode === 'notes' ? 'Заметки' : 'Ссылки';
   }
   function toggleMode() {
-    state.mode = state.mode === 'tasks' ? 'notes' : 'tasks';
+    state.mode = state.mode === 'tasks' ? 'notes' : state.mode === 'notes' ? 'links' : 'tasks';
     localStorage.setItem('nf.mode', state.mode);
     updateModeButton();
     render();
@@ -470,8 +457,11 @@
 
   function render() {
     const root = document.getElementById('viewRoot');
-    root.innerHTML = state.mode === 'tasks' ? renderTasksView() : renderNotesView();
+    if (state.mode === 'tasks') root.innerHTML = renderTasksView();
+    else if (state.mode === 'notes') root.innerHTML = renderNotesView();
+    else root.innerHTML = renderLinksView();
     bindViewEvents();
+    if (state.mode === 'links') bindLinksView();
   }
 
   function allCategories(type) {
@@ -538,7 +528,7 @@
             ${desc}
             <div class="item-meta">
               ${cat}${tags}
-              ${rem ? `<span class="${cls}">⏱ ${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>` : ''}
+              ${rem ? `<span class="${cls}">${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>` : ''}
             </div>
           </div>
         </div>
@@ -1263,23 +1253,6 @@
         else if (md === 'chart') insertAtCursor('\n```chart\n[3, 7, 4, 9, 6]\n```\n');
       });
     });
-
-    const pop = document.getElementById('emojiPopover');
-    document.getElementById('emojiBtn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      const rect = e.currentTarget.getBoundingClientRect();
-      pop.style.left = Math.min(rect.left, window.innerWidth - 316) + 'px';
-      pop.style.top = (rect.bottom + 6) + 'px';
-      pop.hidden = !pop.hidden;
-    });
-    pop.innerHTML = Object.keys(EMOJI).map((k) => `<button data-emoji="${k}" title=":${k}:">${EMOJI[k]}</button>`).join('');
-    pop.addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-emoji]');
-      if (!b) return;
-      insertAtCursor(':' + b.dataset.emoji + ':');
-      pop.hidden = true;
-    });
-    document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true; });
   }
 
   /* ====================== КОРЗИНА ====================== */
@@ -1412,15 +1385,68 @@
   /* ====================== ССЫЛКИ (ЗАКЛАДКИ) ====================== */
 
   function openLinks() {
-    const o = document.getElementById('linksOverlay');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    renderLinks();
+    state.mode = 'links';
+    localStorage.setItem('nf.mode', state.mode);
+    updateModeButton();
+    render();
   }
-  function closeLinks() {
-    const o = document.getElementById('linksOverlay');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
+
+  function renderLinksView() {
+    const count = window.Links ? Links.links.length : 0;
+    return `
+      <div class="view-head">
+        <div>
+          <h1 class="view-title">Ссылки</h1>
+          <div class="view-sub" id="linksCountLabel">${count} сохранено</div>
+        </div>
+        <div class="view-actions">
+          <button class="btn ghost" id="linksSyncBtn">Синхр.</button>
+        </div>
+      </div>
+
+      <div class="links-body">
+        <div class="links-toolbar">
+          <div class="links-search">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="linksSearch" placeholder="Поиск по ссылке, тегу, домену…" autocomplete="off">
+          </div>
+          <select class="select-sm" id="linksGroupFilter"><option value="">Все группы</option></select>
+          <select class="select-sm" id="linksDomainFilter"><option value="">Все домены</option></select>
+          <select class="select-sm" id="linksSort">
+            <option value="domain">По домену</option>
+            <option value="date">По дате</option>
+            <option value="title">По названию</option>
+          </select>
+        </div>
+
+        <div class="links-add-row">
+          <input type="text" id="linksAddUrl" placeholder="https://… — вставь ссылку" autocomplete="off">
+          <input type="text" id="linksAddTitle" placeholder="Название (необязательно)" autocomplete="off">
+          <select class="select-sm" id="linksAddGroup"><option value="">Без группы</option></select>
+          <button class="btn primary" id="linksAddBtn">Добавить</button>
+        </div>
+
+        <div class="links-groups">
+          <span class="field-label">Группы</span>
+          <div class="group-chips" id="linksGroups"></div>
+          <div class="group-add">
+            <input type="text" id="linksNewGroup" placeholder="Новая группа…" autocomplete="off">
+            <button class="btn sm" id="linksAddGroupBtn">+</button>
+          </div>
+        </div>
+
+        <details class="links-blocklist">
+          <summary>Фильтр: какие ссылки НЕ сохранять</summary>
+          <div class="blocklist-add">
+            <input type="text" id="linksBlockInput" placeholder="домен (example.com) или целый URL" autocomplete="off">
+            <button class="btn sm" id="linksBlockAdd">Заблокировать</button>
+          </div>
+          <div class="blocklist-chips" id="linksBlocklist"></div>
+        </details>
+
+        <div class="links-list" id="linksList"></div>
+      </div>
+    `;
   }
 
   function renderLinks() {
@@ -1428,6 +1454,8 @@
     renderLinksGroups();
     renderLinksBlocklist();
     renderLinksList();
+    const label = document.getElementById('linksCountLabel');
+    if (label) label.textContent = Links.links.length + ' сохранено';
   }
 
   function renderLinksFilters() {
@@ -1554,8 +1582,7 @@
   }
 
 
-  function bindLinks() {
-    document.getElementById('linksClose').addEventListener('click', closeLinks);
+  function bindLinksView() {
     document.getElementById('linksSearch').addEventListener('input', () => renderLinksList());
     document.getElementById('linksGroupFilter').addEventListener('change', () => renderLinksList());
     document.getElementById('linksDomainFilter').addEventListener('change', () => renderLinksList());
@@ -1603,6 +1630,8 @@
       try { await Links.saveToCloud(); toast('Ссылки сохранены в аккаунт', 'ok'); }
       catch (e) { toast('Ошибка: ' + e.message, 'err'); }
     });
+
+    renderLinks();
   }
 
 
@@ -1629,6 +1658,10 @@
     const close = () => { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden','true'); };
     document.getElementById('settingsClose').addEventListener('click', close);
     // Закрытие только по крестику — клик по фону больше не закрывает окно.
+
+    document.querySelectorAll('#settingsTabs button').forEach((b) => {
+      b.addEventListener('click', () => switchSettingsTab(b.dataset.settingsTab));
+    });
 
     document.getElementById('aiSave').addEventListener('click', async () => {
       AI.setConfig({
@@ -1863,10 +1896,16 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
 
   /* ====================== МОДАЛКИ-ХЕЛПЕРЫ (для палитры) ====================== */
 
+  function switchSettingsTab(name) {
+    document.querySelectorAll('#settingsTabs button').forEach((b) => b.classList.toggle('active', b.dataset.settingsTab === name));
+    document.querySelectorAll('.settings-tab').forEach((el) => { el.hidden = el.id !== 'settingsTab-' + name; });
+  }
+
   function openSettingsModal() {
     const overlay = document.getElementById('settingsOverlay');
     overlay.classList.add('open');
     overlay.setAttribute('aria-hidden', 'false');
+    switchSettingsTab('ai');
     refreshAiSettingsForm();
     const rememberEl = document.getElementById('aiRemember');
     const rememberRow = document.getElementById('aiRememberRow');
@@ -1924,6 +1963,11 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
 
     document.getElementById('addTaskBtn').addEventListener('click', () => { closeAddSheet(); openEditor(null, 'task'); });
     document.getElementById('addNoteBtn').addEventListener('click', () => { closeAddSheet(); openEditor(null, 'note'); });
+    document.getElementById('addLinkBtn').addEventListener('click', () => {
+      closeAddSheet();
+      openLinks();
+      setTimeout(() => document.getElementById('linksAddUrl')?.focus(), 80);
+    });
     document.getElementById('addSheetCancel').addEventListener('click', closeAddSheet);
 
     const run = async () => {
@@ -1947,7 +1991,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     return [
       { id:'new-task', icon:'task', title:'Новая задача', hint:'задача', run: () => openEditor(null, 'task') },
       { id:'new-note', icon:'note', title:'Новая заметка', hint:'заметка', run: () => openEditor(null, 'note') },
-      { id:'mode', icon:'swap', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : 'сейчас заметки', run: () => toggleMode() },
+      { id:'mode', icon:'swap', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : state.mode === 'notes' ? 'сейчас заметки' : 'сейчас ссылки', run: () => toggleMode() },
       { id:'theme', icon:'theme', title:'Сменить тему', hint: THEME_LABELS[state.theme] || state.theme, run: () => cycleTheme() },
       { id:'metrics', icon:'metrics', title:'Аналитика', hint:'статистика', run: () => openMetrics() },
       { id:'links', icon:'link', title:'Ссылки', hint:'закладки', run: () => openLinks() },
@@ -2086,7 +2130,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     if (it.type === 'task' && it.deadline) {
       const rem = remaining(it.deadline);
       const cls = rem && rem.kind === 'overdue' ? 'timer overdue' : rem && rem.kind === 'soon' ? 'timer soon' : 'timer';
-      meta.push(`<span class="${cls}">⏱ ${escapeHtml(rem ? rem.text : '')}</span>`);
+      meta.push(`<span class="${cls}">${escapeHtml(rem ? rem.text : '')}</span>`);
     }
     const desc = it.body
         ? `<div class="search-desc">${searchSnippet(it.body, needle)}</div>`
@@ -2323,7 +2367,6 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     bindSettings();
     bindTrash();
     bindDrafts();
-    bindLinks();
     bindHotkeys();
     bindAccount();
     bindPalette();
