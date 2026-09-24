@@ -1,6 +1,6 @@
 // NodeFlow service worker — офлайн-кэш оболочки.
 
-const CACHE_VERSION = 'nodeflow-v13';
+const CACHE_VERSION = 'nodeflow-v14';
 const SHELL_FILES = [
     '/',
     '/index.html',
@@ -10,6 +10,7 @@ const SHELL_FILES = [
     '/js/ai.js',
     '/js/email.js',
     '/js/db.js',
+    '/js/links.js',
     '/js/app.js',
     '/icons/icon.svg',
     '/icons/maskable.svg',

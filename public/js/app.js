@@ -21,6 +21,7 @@
   const ICONS = {
     task: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
     note: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
     search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     swap: '<path d="M7 16V4M7 4L3 8M7 4l4 4"/><path d="M17 8v12M17 20l4-4M17 20l-4-4"/>',
@@ -131,13 +132,20 @@
     return html + '</tbody></table>';
   }
 
+  function safeUrl(u) {
+    return /^(https?:\/\/|data:image\/)/i.test(u) ? u : '#';
+  }
+
+  const isImageUrl = (u) => /^data:image\//i.test(u) || /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i.test(u);
+
   function renderInline(text) {
     let s = escapeHtml(text);
-    s = s.replace(/@\[([a-zA-Z0-9_-]+)\]/g, (_, id) => {
-      const it = state.items.find((x) => x.id === id);
-      const label = it ? escapeHtml(it.title || '(без названия)') : 'missing';
-      return `<a class="ref" data-ref="${id}" href="#">↗ ${label}</a>`;
-    });
+    // Изображения ![alt](url)
+    s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, alt, url) =>
+        `<img class="md-img" src="${escapeHtml(safeUrl(url))}" alt="${escapeHtml(alt)}" loading="lazy">`);
+    // Ссылки [label](url)
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) =>
+        `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
     s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -183,6 +191,18 @@
       // нумерацию заново с 1. Список закроется естественным образом,
       // как только встретится строка другого типа (см. ветки ниже).
       if (!raw.trim()) { continue; }
+
+      // Строка, целиком состоящая из URL: картинка или внешняя ссылка.
+      const bare = raw.trim();
+      if (/^https?:\/\/\S+$/.test(bare)) {
+        closeList();
+        if (isImageUrl(bare)) {
+          out.push(`<p class="md-img-block"><img class="md-img" src="${escapeHtml(safeUrl(bare))}" alt="" loading="lazy"></p>`);
+        } else {
+          out.push(`<p><a href="${escapeHtml(safeUrl(bare))}" target="_blank" rel="noopener noreferrer">${escapeHtml(bare)}</a></p>`);
+        }
+        continue;
+      }
 
       const h = raw.match(/^(#{1,3})\s+(.+)$/);
       if (h) { closeList(); out.push(`<h${h[1].length}>${renderInline(h[2])}</h${h[1].length}>`); continue; }
@@ -315,7 +335,7 @@
       const all = await DB.allItems();
       // Служебная запись с настройками ИИ (см. ai.js) не должна попадать
       // в обычные списки/фильтры/метрики — убираем её здесь один раз.
-      state.items = all.filter((x) => x.id !== '__ai_settings__' && x.title !== '__ai_settings__');
+      state.items = all.filter((x) => x.id !== '__ai_settings__' && x.title !== '__ai_settings__' && x.id !== '__links__' && x.title !== '__links__');
       setSyncStatus('Сохранено', 'ok');
     } catch (e) {
       console.error('[load]', e);
@@ -394,7 +414,6 @@
         category: parsed.category,
         tags: parsed.tags,
         font: 'sans',
-        references: [],
         done: false,
         deleted: false,
         createdAt: now,
@@ -404,6 +423,7 @@
         item.deadline = parsed.deadline;
       }
       await persist(item);
+      if (window.Links) Links.ingestFromItem(item);
       input.value = '';
       render();
       toast(`Добавлено: ${parsed.title || 'запись'}`, 'ok');
@@ -530,11 +550,6 @@
     const tags = (it.tags||[]).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
     const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
     const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 220))}</div>` : '';
-    const refs = (it.references||[]).map((r) => {
-      const t = state.items.find((x) => x.id === r);
-      if (!t || t.deleted) return '';
-      return `<a class="mini-tag accent" data-ref="${r}" href="#">↗ ${escapeHtml(t.title || '(без названия)')}</a>`;
-    }).join('');
     return `
       <div class="swipe-item" data-id="${it.id}">
         <div class="swipe-actions">
@@ -544,7 +559,7 @@
           <div class="item-body">
             <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
             ${desc}
-            <div class="item-meta">${cat}${tags}${refs}</div>
+            <div class="item-meta">${cat}${tags}</div>
           </div>
         </div>
       </div>
@@ -575,6 +590,7 @@
         </div>
       </div>
 
+      ${renderQuickAddBar()}
 
       <div class="list">
         ${sortedActive.length ? sortedActive.map(renderTaskRow).join('') : '<div class="empty-state">Нет активных задач</div>'}
@@ -599,6 +615,7 @@
         </div>
       </div>
 
+      ${renderQuickAddBar()}
 
       <div class="list">
         ${sorted.length ? sorted.map(renderNoteRow).join('') : '<div class="empty-state">Пока нет заметок</div>'}
@@ -731,19 +748,9 @@
       el.dataset.bound = '1';
       el.addEventListener('click', (e) => {
         if (e.target.closest('.checkbox')) return;
-        if (e.target.closest('a.ref, a.mini-tag')) return;
         const sw = el.closest('.swipe-item');
         if (sw && sw.classList.contains('open')) { closeSwipe(sw); return; }
         const it = state.items.find((x) => x.id === el.dataset.id);
-        if (it) openEditor(it, it.type);
-      });
-    });
-    scope.querySelectorAll('a.ref, a.mini-tag[data-ref]').forEach((a) => {
-      if (a.dataset.bound) return;
-      a.dataset.bound = '1';
-      a.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const it = state.items.find((x) => x.id === a.dataset.ref);
         if (it) openEditor(it, it.type);
       });
     });
@@ -779,6 +786,7 @@
     const active = total - done;
     const overdue = tasks.filter((x) => !x.done && x.deadline && x.deadline < Date.now()).length;
     const pct = total ? Math.round((done/total)*100) : 0;
+    const linksCount = window.Links ? Links.links.length : 0;
 
     const DAYS = 14;
     const today0 = startOfDay();
@@ -802,10 +810,16 @@
 
     body.innerHTML = `
       <div class="metrics-grid">
-        <div class="metric"><div class="k">${svgIcon('total', 13)} Всего</div><div class="v">${total}</div></div>
-        <div class="metric"><div class="k">${svgIcon('bolt', 13)} Активных</div><div class="v">${active}</div></div>
-        <div class="metric"><div class="k">${svgIcon('clock', 13)} Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div></div>
-        <div class="metric metric-ring"><div class="k">${svgIcon('target', 13)} Готовность</div>${svgRing(pct)}</div>
+        <div class="metric"><div class="k">${svgIcon('total', 13)} Задач</div><div class="v">${total}</div><div class="s">всего</div></div>
+        <div class="metric"><div class="k">${svgIcon('bolt', 13)} Активных</div><div class="v">${active}</div><div class="s">${total ? Math.round((active/total)*100) : 0}% от всех</div></div>
+        <div class="metric"><div class="k">${svgIcon('clock', 13)} Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div><div class="s">нужно внимание</div></div>
+        <div class="metric"><div class="k">${svgIcon('target', 13)} Готовность</div><div class="v ok">${pct}%</div><div class="s">выполнено</div></div>
+      </div>
+
+      <div class="metrics-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="metric"><div class="k">${svgIcon('note', 13)} Заметок</div><div class="v">${notes.length}</div></div>
+        <div class="metric"><div class="k">${svgIcon('link', 13)} Ссылок</div><div class="v">${linksCount}</div></div>
+        <div class="metric"><div class="k">${svgIcon('clock', 13)} Выполнено</div><div class="v">${done}</div></div>
       </div>
 
       <div class="metrics-section">
@@ -818,7 +832,7 @@
       <div class="metrics-section">
         <div class="metrics-section-head">По дедлайнам · дни недели</div>
         <div class="metrics-chart-card">
-          ${svgBarChart(['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((label,i)=>({value:weekday[(i+1)%7],label})), { height: 140 })}
+          ${svgBarChart(['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((label,i)=>({value:weekday[(i+1)%7],label})), { height: 150 })}
         </div>
       </div>
 
@@ -848,14 +862,6 @@
           </div>
         </div>
       </div>
-
-      <div class="metrics-section">
-        <div class="metrics-section-head">Заметки</div>
-        <div class="metrics-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:0">
-          <div class="metric"><div class="k">Всего заметок</div><div class="v">${notes.length}</div></div>
-          <div class="metric"><div class="k">Со ссылками</div><div class="v">${notes.filter(n => (n.references||[]).length).length}</div></div>
-        </div>
-      </div>
     `;
   }
 
@@ -873,6 +879,7 @@
       const x = padX + i*stepX + (stepX-barW)/2;
       const y = H - padBot - h;
       out += `<rect class="chart-bar ${d.value===0?'dim':''}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(h,1).toFixed(1)}" rx="2"/>`;
+      if (d.value) out += `<text class="chart-value" x="${(x+barW/2).toFixed(1)}" y="${(y-5).toFixed(1)}" text-anchor="middle">${d.value}</text>`;
       if (d.label) out += `<text class="chart-label" x="${(x+barW/2).toFixed(1)}" y="${H-6}" text-anchor="middle">${d.label}</text>`;
     });
     out += `<line class="chart-axis" x1="${padX}" y1="${H-padBot}" x2="${W-padX}" y2="${H-padBot}"/>`;
@@ -930,7 +937,7 @@
             <div class="donut-legend-row">
               <span class="donut-swatch" style="background:${s.color}"></span>
               <span class="donut-legend-label">${s.label}</span>
-              <span class="donut-legend-value">${s.value}</span>
+              <span class="donut-legend-value">${s.value} · ${Math.round((s.value/total)*100)}%</span>
             </div>
           `).join('')}
         </div>
@@ -943,8 +950,7 @@
   const editor = {
     overlay:null, titleEl:null, categoryEl:null, tagsEl:null,
     deadlineEl:null, importanceEl:null, fontEl:null,
-    bodyEl:null, previewEl:null, refsEl:null,
-    refsSelected: new Set(),
+    bodyEl:null, previewEl:null,
   };
   let autosaveTimer = null;
   let aiBusy = false;
@@ -965,7 +971,7 @@
 
     const t = item || {
       title:'', body:'', category:'', tags:[],
-      importance:'green', deadline:null, font:'sans', references:[], done:false,
+      importance:'green', deadline:null, font:'sans', done:false,
     };
 
     editor.titleEl.value = t.title || '';
@@ -976,8 +982,6 @@
     editor.fontEl.value = t.font === 'mono' ? 'mono' : 'sans';
     editor.bodyEl.value = t.body || '';
 
-    editor.refsSelected = new Set(t.references || []);
-    renderRefPicker();
     renderCategoryDatalist();
     setEditorType(state.editingType);
     updatePreview();
@@ -1006,31 +1010,6 @@
     dl.innerHTML = [...cats].map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
   }
 
-  function renderRefPicker() {
-    const others = state.items
-        .filter((x) => x.id !== state.editingId && !hidden(x))
-        .sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0))
-        .slice(0, 40);
-    if (!others.length) {
-      editor.refsEl.innerHTML = '<span class="mini-tag muted">нет доступных записей</span>';
-      return;
-    }
-    editor.refsEl.innerHTML = others.map((o) => `
-      <button type="button" class="ref-chip ${editor.refsSelected.has(o.id) ? 'on' : ''}" data-ref-id="${o.id}">
-        ${o.type === 'task' ? '✓' : '¶'} ${escapeHtml(o.title || '(без названия)')}
-      </button>
-    `).join('');
-    editor.refsEl.querySelectorAll('.ref-chip').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.dataset.refId;
-        if (editor.refsSelected.has(id)) editor.refsSelected.delete(id);
-        else editor.refsSelected.add(id);
-        btn.classList.toggle('on');
-        scheduleAutosave();
-      });
-    });
-  }
-
   function updateCharCount() {
     const el = document.getElementById('charCount');
     if (!el || !editor.bodyEl) return;
@@ -1050,6 +1029,21 @@
     const s = ta.selectionStart, e = ta.selectionEnd;
     ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
     ta.selectionStart = ta.selectionEnd = s + text.length;
+    ta.focus();
+    updatePreview();
+    scheduleAutosave();
+  }
+
+  // Оборачивает выделенный текст в markdown-маркеры (или вставляет шаблон,
+  // если ничего не выделено), а выделение ставит на сам текст.
+  function wrapSelection(before, after, placeholder) {
+    const ta = editor.bodyEl;
+    const s = ta.selectionStart, e = ta.selectionEnd;
+    const inner = ta.value.slice(s, e) || placeholder;
+    const insert = before + inner + after;
+    ta.value = ta.value.slice(0, s) + insert + ta.value.slice(e);
+    ta.selectionStart = s + before.length;
+    ta.selectionEnd = s + before.length + inner.length;
     ta.focus();
     updatePreview();
     scheduleAutosave();
@@ -1142,7 +1136,6 @@
     item.category = editor.categoryEl.value.trim();
     item.tags = editor.tagsEl.value.split(',').map((s) => s.trim()).filter(Boolean);
     item.font = editor.fontEl.value === 'mono' ? 'mono' : 'sans';
-    item.references = [...editor.refsSelected];
     if (item.type === 'task') {
       item.deadline = fromLocalInput(editor.deadlineEl.value);
       item.importance = editor.importanceEl.value;
@@ -1183,6 +1176,8 @@
       // место, где черновик становится настоящей задачей/заметкой.
       item.draft = isAutosave ? (item.draft !== false) : false;
       await persist(item);
+      // Ссылки собираем только с реально сохранённых записей (не с черновиков).
+      if (!isAutosave && window.Links) Links.ingestFromItem(item);
     } finally {
       saveLock = false;
     }
@@ -1237,7 +1232,6 @@
     editor.fontEl = document.getElementById('editorFont');
     editor.bodyEl = document.getElementById('editorBody');
     editor.previewEl = document.getElementById('editorPreview');
-    editor.refsEl = document.getElementById('editorRefs');
 
     document.querySelectorAll('#editorTypeSwitch button').forEach((b) => {
       b.addEventListener('click', () => { setEditorType(b.dataset.type); scheduleAutosave(); });
@@ -1261,9 +1255,10 @@
     document.querySelectorAll('.toolbar .tool').forEach((btn) => {
       btn.addEventListener('click', () => {
         const md = btn.dataset.md;
-        if (md === '**') insertAtCursor('**жирный**');
-        else if (md === '*') insertAtCursor('*курсив*');
-        else if (md === 'code') insertAtCursor('\n```javascript\n// код\n```\n');
+        if (md === '**') wrapSelection('**', '**', 'жирный');
+        else if (md === '*') wrapSelection('*', '*', 'курсив');
+        else if (md === 'code') wrapSelection('\n```\n', '\n```\n', 'код');
+        else if (md === 'image') insertAtCursor('![описание](https://…)');
         else if (md === 'table') insertAtCursor('\n| A | B |\n| - | - |\n| 1 | 2 |\n');
         else if (md === 'chart') insertAtCursor('\n```chart\n[3, 7, 4, 9, 6]\n```\n');
       });
@@ -1414,6 +1409,203 @@
     });
   }
 
+  /* ====================== ССЫЛКИ (ЗАКЛАДКИ) ====================== */
+
+  function openLinks() {
+    const o = document.getElementById('linksOverlay');
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+    renderLinks();
+  }
+  function closeLinks() {
+    const o = document.getElementById('linksOverlay');
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function renderLinks() {
+    renderLinksFilters();
+    renderLinksGroups();
+    renderLinksBlocklist();
+    renderLinksList();
+  }
+
+  function renderLinksFilters() {
+    const groupSel = document.getElementById('linksGroupFilter');
+    const domainSel = document.getElementById('linksDomainFilter');
+    const addGroupSel = document.getElementById('linksAddGroup');
+    const curGroup = groupSel.value;
+    const curDomain = domainSel.value;
+    const curAddGroup = addGroupSel.value;
+    groupSel.innerHTML = '<option value="">Все группы</option>' + Links.groups.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`).join('');
+    domainSel.innerHTML = '<option value="">Все домены</option>' + Links.allDomains().map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+    addGroupSel.innerHTML = '<option value="">Без группы</option>' + Links.groups.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`).join('');
+    groupSel.value = curGroup;
+    domainSel.value = curDomain;
+    addGroupSel.value = curAddGroup;
+  }
+
+  function renderLinksGroups() {
+    const box = document.getElementById('linksGroups');
+    if (!Links.groups.length) { box.innerHTML = '<span class="mini-tag muted">групп пока нет — добавь ниже</span>'; return; }
+    box.innerHTML = Links.groups.map(g => `
+      <span class="group-chip" data-group="${escapeHtml(g.id)}">
+        <span class="group-name">${escapeHtml(g.name)}</span>
+        <button type="button" class="group-del" data-group-del="${escapeHtml(g.id)}" title="Удалить группу">×</button>
+      </span>
+    `).join('');
+    box.querySelectorAll('.group-chip').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        if (e.target.closest('.group-del')) return;
+        const id = chip.dataset.group;
+        const g = Links.groups.find((x) => x.id === id);
+        if (!g) return;
+        const name = prompt('Название группы', g.name);
+        if (name && name.trim()) { Links.renameGroup(id, name); renderLinks(); }
+      });
+    });
+    box.querySelectorAll('.group-del').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.groupDel;
+        if (!(await askConfirm({ title: 'Удалить группу?', message: 'Ссылки останутся, но станут без группы.', actionText: 'Удалить' }))) return;
+        Links.removeGroup(id);
+        renderLinks();
+      });
+    });
+  }
+
+  function renderLinksBlocklist() {
+    const box = document.getElementById('linksBlocklist');
+    if (!Links.blocklist.length) { box.innerHTML = '<span class="mini-tag muted">фильтров нет</span>'; return; }
+    box.innerHTML = Links.blocklist.map((b) => `
+      <span class="block-chip">
+        <span class="block-type">${b.type === 'domain' ? 'домен' : 'url'}</span>
+        <span class="block-value">${escapeHtml(b.value)}</span>
+        <button type="button" class="group-del" data-block-del="${escapeHtml(b.value)}" title="Убрать фильтр">×</button>
+      </span>
+    `).join('');
+    box.querySelectorAll('[data-block-del]').forEach((btn) => {
+      btn.addEventListener('click', () => { Links.removeBlock(btn.dataset.blockDel); renderLinks(); });
+    });
+  }
+
+  function renderLinksList() {
+    const list = document.getElementById('linksList');
+    const q = document.getElementById('linksSearch').value.trim().toLowerCase();
+    const gf = document.getElementById('linksGroupFilter').value;
+    const df = document.getElementById('linksDomainFilter').value;
+    const sort = document.getElementById('linksSort').value;
+
+    let links = Links.links.filter((l) => {
+      if (gf && l.group !== gf) return false;
+      if (df && l.domain !== df) return false;
+      if (q) {
+        const hay = (l.url + ' ' + (l.title || '') + ' ' + (l.domain || '') + ' ' + (l.tags || []).join(' ')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (sort === 'date') links = [...links].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    else if (sort === 'title') links = [...links].sort((a, b) => (a.title || a.domain || '').localeCompare(b.title || b.domain || ''));
+    else links = [...links].sort((a, b) => (a.domain || '').localeCompare(b.domain || '') || (b.createdAt || 0) - (a.createdAt || 0));
+
+    if (!links.length) { list.innerHTML = '<div class="empty-state">Ссылок нет. Они появятся автоматически из твоих заметок и задач.</div>'; return; }
+
+    const groupOptions = (sel) => '<option value="">Без группы</option>' + Links.groups.map(g => `<option value="${escapeHtml(g.id)}"${g.id === sel ? ' selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
+
+    list.innerHTML = links.map((l) => `
+      <div class="link-row" data-id="${escapeHtml(l.id)}">
+        <div class="link-row-top">
+          <span class="link-dot">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>
+          <div class="link-row-text">
+            <input class="link-title-input" data-link-title="${escapeHtml(l.id)}" value="${escapeHtml(l.title)}" placeholder="${escapeHtml(l.domain || 'Название')}">
+            <div class="link-url-line">
+              <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.url)}</a>
+              <span class="mini-tag muted">${escapeHtml(l.domain)}</span>
+            </div>
+            <div class="link-row-bottom">
+              <input class="link-tags-input" data-link-tags="${escapeHtml(l.id)}" value="${escapeHtml((l.tags || []).join(', '))}" placeholder="теги через запятую">
+              <select class="select-sm link-group-select" data-link-group="${escapeHtml(l.id)}">${groupOptions(l.group)}</select>
+              <button class="btn sm ghost" data-link-del="${escapeHtml(l.id)}">Удалить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('[data-link-title]').forEach((inp) => {
+      inp.addEventListener('change', () => Links.updateLink(inp.dataset.linkTitle, { title: inp.value.trim() }));
+    });
+    list.querySelectorAll('[data-link-tags]').forEach((inp) => {
+      inp.addEventListener('change', () => Links.updateLink(inp.dataset.linkTags, { tags: inp.value.split(',').map(s => s.trim()).filter(Boolean) }));
+    });
+    list.querySelectorAll('[data-link-group]').forEach((sel) => {
+      sel.addEventListener('change', () => Links.updateLink(sel.dataset.linkGroup, { group: sel.value }));
+    });
+    list.querySelectorAll('[data-link-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!(await askConfirm({ title: 'Удалить ссылку?', message: 'Ссылка будет убрана из коллекции.', actionText: 'Удалить' }))) return;
+        Links.removeLink(btn.dataset.linkDel);
+        renderLinks();
+        refreshSettingsNav();
+      });
+    });
+  }
+
+
+  function bindLinks() {
+    document.getElementById('linksClose').addEventListener('click', closeLinks);
+    document.getElementById('linksSearch').addEventListener('input', () => renderLinksList());
+    document.getElementById('linksGroupFilter').addEventListener('change', () => renderLinksList());
+    document.getElementById('linksDomainFilter').addEventListener('change', () => renderLinksList());
+    document.getElementById('linksSort').addEventListener('change', () => renderLinksList());
+
+    const add = () => {
+      const url = document.getElementById('linksAddUrl').value.trim();
+      const title = document.getElementById('linksAddTitle').value.trim();
+      const group = document.getElementById('linksAddGroup').value;
+      if (!url) return;
+      const res = Links.addLink(url, { title, group });
+      if (!res) { toast('Не удалось добавить ссылку', 'err'); return; }
+      document.getElementById('linksAddUrl').value = '';
+      document.getElementById('linksAddTitle').value = '';
+      renderLinks();
+      refreshSettingsNav();
+    };
+    document.getElementById('linksAddBtn').addEventListener('click', add);
+    document.getElementById('linksAddUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+
+    const addGroup = () => {
+      const inp = document.getElementById('linksNewGroup');
+      const name = inp.value.trim();
+      if (!name) return;
+      Links.addGroup(name);
+      inp.value = '';
+      renderLinks();
+    };
+    document.getElementById('linksAddGroupBtn').addEventListener('click', addGroup);
+    document.getElementById('linksNewGroup').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } });
+
+    const addBlock = () => {
+      const inp = document.getElementById('linksBlockInput');
+      const v = inp.value.trim();
+      if (!v) return;
+      Links.addBlock(v);
+      inp.value = '';
+      renderLinks();
+    };
+    document.getElementById('linksBlockAdd').addEventListener('click', addBlock);
+    document.getElementById('linksBlockInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addBlock(); } });
+
+    document.getElementById('linksSyncBtn').addEventListener('click', async () => {
+      if (!Auth.isSignedIn()) { toast('Нужно войти в аккаунт', 'err'); return; }
+      try { await Links.saveToCloud(); toast('Ссылки сохранены в аккаунт', 'ok'); }
+      catch (e) { toast('Ошибка: ' + e.message, 'err'); }
+    });
+  }
+
+
   /* ====================== НАСТРОЙКИ / АККАУНТ ====================== */
 
   function setStatus(id, text, cls = '') {
@@ -1425,12 +1617,11 @@
 
   function refreshAiSettingsForm() {
     const a = AI.config;
-    const providerEl = document.getElementById('aiProvider');
-    if (!providerEl) return; // модалка ещё не забинжена
-    providerEl.value = a.provider || '';
-    document.getElementById('aiKey').value = a.apiKey || '';
+    const baseUrlEl = document.getElementById('aiBaseUrl');
+    if (!baseUrlEl) return; // модалка ещё не забинжена
     document.getElementById('aiBaseUrl').value = a.baseUrl || '';
     document.getElementById('aiModel').value = a.model || '';
+    document.getElementById('aiKey').value = a.apiKey || '';
   }
 
   function bindSettings() {
@@ -1441,7 +1632,6 @@
 
     document.getElementById('aiSave').addEventListener('click', async () => {
       AI.setConfig({
-        provider: document.getElementById('aiProvider').value,
         apiKey: document.getElementById('aiKey').value.trim(),
         baseUrl: document.getElementById('aiBaseUrl').value.trim(),
         model: document.getElementById('aiModel').value.trim(),
@@ -1488,6 +1678,7 @@
     document.getElementById('navMetrics').addEventListener('click', () => { closeSettingsModal(); openMetrics(); });
     document.getElementById('navDrafts').addEventListener('click', () => { closeSettingsModal(); openDrafts(); });
     document.getElementById('navTrash').addEventListener('click', () => { closeSettingsModal(); openTrash(); });
+    document.getElementById('navLinks').addEventListener('click', () => { closeSettingsModal(); openLinks(); });
 
     bindEmailSettings();
   }
@@ -1696,10 +1887,13 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
   function refreshSettingsNav() {
     const draftsCount = state.items.filter((x) => draft(x) && !deleted(x)).length;
     const trashCount = state.items.filter(deleted).length;
+    const linksCount = window.Links ? Links.links.length : 0;
     const d = document.getElementById('navDraftsCount');
     const t = document.getElementById('navTrashCount');
+    const l = document.getElementById('navLinksCount');
     if (d) { d.textContent = draftsCount; d.hidden = !draftsCount; }
     if (t) { t.textContent = trashCount; t.hidden = !trashCount; }
+    if (l) { l.textContent = linksCount; l.hidden = !linksCount; }
   }
 
   function openAccountModal() {
@@ -1756,6 +1950,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
       { id:'mode', icon:'swap', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : 'сейчас заметки', run: () => toggleMode() },
       { id:'theme', icon:'theme', title:'Сменить тему', hint: THEME_LABELS[state.theme] || state.theme, run: () => cycleTheme() },
       { id:'metrics', icon:'metrics', title:'Аналитика', hint:'статистика', run: () => openMetrics() },
+      { id:'links', icon:'link', title:'Ссылки', hint:'закладки', run: () => openLinks() },
       { id:'drafts', icon:'drafts', title:'Черновики', hint:'несохранённые', run: () => openDrafts() },
       { id:'trash', icon:'trash', title:'Корзина', hint:'удалённые', run: () => openTrash() },
       { id:'settings', icon:'settings', title:'Настройки', hint:'ИИ и email', run: () => openSettingsModal() },
@@ -2113,6 +2308,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
       if (Auth.isSignedIn()) {
         loadItems().then(render);
         AI.loadFromCloud().then((got) => { if (got) refreshAiSettingsForm(); });
+        if (window.Links) Links.loadFromCloud();
       } else { state.items = []; setSyncStatus('', ''); render(); }
     });
     updateAccountChip();
@@ -2120,12 +2316,14 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     if (Auth.isSignedIn()) {
       await loadItems();
       await AI.loadFromCloud();
+      if (window.Links) await Links.loadFromCloud();
     }
 
     bindEditor();
     bindSettings();
     bindTrash();
     bindDrafts();
+    bindLinks();
     bindHotkeys();
     bindAccount();
     bindPalette();

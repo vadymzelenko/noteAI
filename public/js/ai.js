@@ -18,19 +18,18 @@
     const CLOUD_RECORD_ID = '__ai_settings__';
 
     const config = {
-        provider: '',   // 'openai' | 'anthropic' | 'local' | ''
-        apiKey: '',
-        baseUrl: '',
+        baseUrl: '',   // OpenAI-совместимый endpoint, напр. https://openrouter.ai/api/v1
         model: '',
+        apiKey: '',    // необязателен для локальных серверов без авторизации
         enabled: false,
     };
 
     function load() {
         // 1. Дефолты из серверного конфига (.env)
         const env = window.NF_CONFIG || {};
-        if (env.AI_DEFAULT_PROVIDER) config.provider = env.AI_DEFAULT_PROVIDER;
         if (env.AI_DEFAULT_MODEL)    config.model    = env.AI_DEFAULT_MODEL;
         if (env.AI_DEFAULT_BASE_URL) config.baseUrl  = env.AI_DEFAULT_BASE_URL;
+        if (env.AI_DEFAULT_API_KEY)  config.apiKey   = env.AI_DEFAULT_API_KEY;
 
         // 2. Перекрываем пользовательскими настройками, сохранёнными локально
         try {
@@ -38,11 +37,11 @@
             if (raw) Object.assign(config, JSON.parse(raw));
         } catch { /* ignore */ }
 
-        config.enabled = !!config.provider && (!!config.apiKey || config.provider === 'local');
+        config.enabled = !!(config.baseUrl && config.model);
     }
 
     function save() {
-        config.enabled = !!config.provider && (!!config.apiKey || config.provider === 'local');
+        config.enabled = !!(config.baseUrl && config.model);
         localStorage.setItem(KEY, JSON.stringify(config));
         return { ...config };
     }
@@ -68,7 +67,7 @@
             if (error || !data || !data.body) return false;
             const cloudConfig = JSON.parse(data.body);
             Object.assign(config, cloudConfig);
-            config.enabled = !!config.provider && (!!config.apiKey || config.provider === 'local');
+            config.enabled = !!(config.baseUrl && config.model);
             localStorage.setItem(KEY, JSON.stringify(config));
             return true;
         } catch (e) {
@@ -117,46 +116,24 @@
         await sb.from('items').delete().eq('id', CLOUD_RECORD_ID).eq('user_id', userId);
     }
 
-    function providerEndpoint() {
-        if (config.baseUrl) return config.baseUrl.replace(/\/$/, '');
-        if (config.provider === 'openai')    return 'https://api.openai.com/v1';
-        if (config.provider === 'anthropic') return 'https://api.anthropic.com/v1';
-        if (config.provider === 'groq')      return 'https://api.groq.com/openai/v1';
-        if (config.provider === 'local')     return 'http://localhost:11434/v1';
-        return '';
+    function endpoint() {
+        let base = (config.baseUrl || '').replace(/\/+$/, '');
+        // Если пользователь вставил полный endpoint до /chat/completions — не дублируем.
+        if (/\/chat\/completions$/.test(base)) base = base.replace(/\/chat\/completions$/, '');
+        return base;
     }
 
-    // Универсальный вызов. Возвращает строку-ответ.
+    // Универсальный OpenAI-совместимый вызов (OpenRouter, OpenAI, Groq, локальные
+    // серверы вроде Ollama/LM Studio). Возвращает строку-ответ. Для настройки
+    // достаточно baseUrl + model, apiKey — если провайдер его требует.
     async function complete(prompt, opts = {}) {
-        if (!config.enabled) throw new Error('ИИ не подключён');
+        if (!config.enabled) throw new Error('ИИ не подключён — укажи base_url и модель');
 
-        const endpoint = providerEndpoint();
-        const model    = opts.model || config.model || 'gpt-4o-mini';
-        const system   = opts.system || 'Ты — ассистент NodeFlow. Отвечай кратко и по делу.';
+        const base = endpoint();
+        const model  = opts.model || config.model;
+        const system = opts.system || 'Ты — ассистент NodeFlow. Отвечай кратко и по делу.';
 
-        if (config.provider === 'anthropic') {
-            const res = await fetch(`${endpoint}/messages`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': config.apiKey,
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-dangerous-direct-browser-access': 'true',
-                },
-                body: JSON.stringify({
-                    model,
-                    max_tokens: opts.maxTokens || 512,
-                    system,
-                    messages: [{ role: 'user', content: prompt }],
-                }),
-            });
-            if (!res.ok) throw new Error('AI HTTP ' + res.status);
-            const data = await res.json();
-            return data.content?.[0]?.text || '';
-        }
-
-        // OpenAI-совместимый (openai / local / кастомный baseUrl)
-        const res = await fetch(`${endpoint}/chat/completions`, {
+        const res = await fetch(`${base}/chat/completions`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -169,9 +146,43 @@
                     { role: 'user',   content: prompt },
                 ],
                 max_tokens: opts.maxTokens || 512,
+                ...(opts.stream ? { stream: true } : {}),
             }),
         });
-        if (!res.ok) throw new Error('AI HTTP ' + res.status);
+
+        if (!res.ok) {
+            let detail = '';
+            try { const j = await res.json(); detail = j?.error?.message || j?.message || ''; } catch {}
+            throw new Error(detail || ('AI HTTP ' + res.status));
+        }
+
+        if (opts.stream) {
+            // Стрим по SSE: собираем delta.content из чанков. Используется редко,
+            // но оставлено для совместимости, если вызывающий захочет прогресс.
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let out = '', buf = '';
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                const parts = buf.split('\n');
+                buf = parts.pop();
+                for (const line of parts) {
+                    const s = line.trim();
+                    if (!s.startsWith('data:')) continue;
+                    const payload = s.slice(5).trim();
+                    if (payload === '[DONE]') continue;
+                    try {
+                        const j = JSON.parse(payload);
+                        const delta = j.choices?.[0]?.delta?.content;
+                        if (delta) out += delta;
+                    } catch { /* ignore */ }
+                }
+            }
+            return out;
+        }
+
         const data = await res.json();
         return data.choices?.[0]?.message?.content || '';
     }

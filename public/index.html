@@ -136,10 +136,6 @@
           </select>
         </label>
 
-        <div class="field field-refs">
-          <span class="field-label">Ссылки</span>
-          <div class="ref-picker" id="editorRefs"></div>
-        </div>
       </div>
 
       <div class="toolbar">
@@ -148,6 +144,8 @@
         <button type="button" class="tool" data-md="code" title="Код" aria-label="Код"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
         <button type="button" class="tool" data-md="table" title="Таблица" aria-label="Таблица"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
         <button type="button" class="tool" data-md="chart" title="График" aria-label="График"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="7" width="3" height="10" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/></svg></button>
+        <button type="button" class="tool" data-md="image" title="Изображение" aria-label="Изображение"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
+
         <button type="button" class="tool" id="emojiBtn" title="Эмодзи" aria-label="Эмодзи"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></button>
         <button type="button" class="tool ai-tool" id="aiPanelToggle" title="ИИ-помощник">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
@@ -175,10 +173,10 @@
         </div>
       </div>
 
-      <textarea id="editorBody" placeholder="Текст… ```js … ``` код, | a | b | таблица, ```chart [1,2,3]``` график, @[id] ссылка"></textarea>
-
-      <div class="field-label mt-12">Предпросмотр</div>
-      <div class="preview md" id="editorPreview"></div>
+      <div class="md-canvas">
+        <textarea id="editorBody" placeholder="Пиши markdown… ![изображение](https://…) — картинка, **жирный**, | a | b | таблица, ```chart [1,2,3]``` график"></textarea>
+        <div class="md-canvas-preview md" id="editorPreview"></div>
+      </div>
     </div>
 
     <footer class="modal-foot">
@@ -202,40 +200,32 @@
     <div class="modal-body">
       <div class="settings-nav">
         <button class="btn" id="navMetrics"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/></svg></span>Аналитика</button>
+        <button class="btn" id="navLinks"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>Ссылки<span class="badge" id="navLinksCount" hidden></span></button>
+
         <button class="btn" id="navDrafts"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>Черновики<span class="badge" id="navDraftsCount" hidden></span></button>
         <button class="btn" id="navTrash"><span class="nav-ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span>Корзина<span class="badge" id="navTrashCount" hidden></span></button>
       </div>
 
-      <p class="hint">Ключ хранится на этом устройстве. Запросы идут напрямую в провайдера. Ниже можно необязательно сохранить настройки (включая ключ) в аккаунт, чтобы не вводить их заново на другом устройстве.</p>
+      <p class="hint">Достаточно вставить <b>Base URL</b> и <b>модель</b> (например, OpenRouter). API-ключ нужен, если провайдер его требует. Запросы идут напрямую по OpenAI-совместимому API. Ниже можно сохранить настройки в аккаунт, чтобы не вводить их заново на другом устройстве.</p>
 
       <div class="form-grid">
         <label class="field span-2">
-          <span class="field-label">Провайдер</span>
-          <select id="aiProvider">
-            <option value="">— не подключен —</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="groq">Groq</option>
-            <option value="local">Локальный сервер</option>
-          </select>
-        </label>
-        <label class="field span-2">
-          <span class="field-label">API-ключ</span>
-          <input id="aiKey" type="password" placeholder="sk-…">
-        </label>
-        <label class="field">
           <span class="field-label">Base URL</span>
-          <input id="aiBaseUrl" type="text" placeholder="https://api.openai.com/v1">
+          <input id="aiBaseUrl" type="text" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
         </label>
         <label class="field">
           <span class="field-label">Модель</span>
-          <input id="aiModel" type="text" placeholder="gpt-4o-mini">
+          <input id="aiModel" type="text" placeholder="nvidia/nemotron-3-ultra-550b-a55b:free" autocomplete="off">
+        </label>
+        <label class="field">
+          <span class="field-label">API-ключ</span>
+          <input id="aiKey" type="password" placeholder="sk-or-v1-… (необязательно)" autocomplete="off">
         </label>
       </div>
 
       <label class="field" id="aiRememberRow" style="flex-direction:row;align-items:center;gap:8px" hidden>
         <input id="aiRemember" type="checkbox" style="width:auto">
-        <span class="field-label" style="margin:0">Запомнить настройки на аккаунте (провайдер, модель и API-ключ) — будут доступны на других устройствах после входа</span>
+        <span class="field-label" style="margin:0">Запомнить настройки на аккаунте (base_url, модель и API-ключ) — будут доступны на других устройствах после входа</span>
       </label>
 
       <div class="row-actions">
@@ -320,6 +310,62 @@
     </footer>
   </div>
 </div>
+
+<!-- ================= Ссылки (закладки) ================= -->
+<div class="modal-overlay" id="linksOverlay" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="modal" style="max-width:760px">
+    <header class="modal-head">
+      <h2 class="modal-title">Ссылки</h2>
+      <div class="modal-head-actions">
+        <button class="btn sm ghost" id="linksSyncBtn" title="Сохранить в аккаунт">Синхр.</button>
+        <button class="icon-btn" id="linksClose" title="Закрыть" aria-label="Закрыть"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </header>
+    <div class="modal-body links-body">
+      <div class="links-toolbar">
+        <div class="links-search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="linksSearch" placeholder="Поиск по ссылке, тегу, домену…" autocomplete="off">
+        </div>
+        <select class="select-sm" id="linksGroupFilter"><option value="">Все группы</option></select>
+        <select class="select-sm" id="linksDomainFilter"><option value="">Все домены</option></select>
+        <select class="select-sm" id="linksSort">
+          <option value="domain">По домену</option>
+          <option value="date">По дате</option>
+          <option value="title">По названию</option>
+        </select>
+      </div>
+
+      <div class="links-add-row">
+        <input type="text" id="linksAddUrl" placeholder="https://… — вставь ссылку" autocomplete="off">
+        <input type="text" id="linksAddTitle" placeholder="Название (необязательно)" autocomplete="off">
+        <select class="select-sm" id="linksAddGroup"><option value="">Без группы</option></select>
+        <button class="btn primary" id="linksAddBtn">Добавить</button>
+      </div>
+
+      <div class="links-groups">
+        <span class="field-label">Группы</span>
+        <div class="group-chips" id="linksGroups"></div>
+        <div class="group-add">
+          <input type="text" id="linksNewGroup" placeholder="Новая группа…" autocomplete="off">
+          <button class="btn sm" id="linksAddGroupBtn">+</button>
+        </div>
+      </div>
+
+      <details class="links-blocklist">
+        <summary>Фильтр: какие ссылки НЕ сохранять</summary>
+        <div class="blocklist-add">
+          <input type="text" id="linksBlockInput" placeholder="домен (example.com) или целый URL" autocomplete="off">
+          <button class="btn sm" id="linksBlockAdd">Заблокировать</button>
+        </div>
+        <div class="blocklist-chips" id="linksBlocklist"></div>
+      </details>
+
+      <div class="links-list" id="linksList"></div>
+    </div>
+  </div>
+</div>
+
 
 <!-- Emoji popover -->
 <div class="popover" id="emojiPopover" hidden></div>
@@ -416,6 +462,7 @@
 <script src="/js/ai.js"></script>
 <script src="/js/email.js"></script>
 <script src="/js/db.js"></script>
+<script src="/js/links.js"></script>
 <script src="/js/app.js"></script>
 
 </body>

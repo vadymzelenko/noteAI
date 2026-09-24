@@ -196,9 +196,9 @@ function runtimeConfig() {
     APP_NAME:            env.APP_NAME || 'NodeFlow',
     SUPABASE_URL:        env.SUPABASE_URL || '',
     SUPABASE_ANON_KEY:   env.SUPABASE_ANON_KEY || '',
-    AI_DEFAULT_PROVIDER: env.AI_DEFAULT_PROVIDER || '',
     AI_DEFAULT_MODEL:    env.AI_DEFAULT_MODEL || '',
     AI_DEFAULT_BASE_URL: env.AI_DEFAULT_BASE_URL || '',
+    AI_DEFAULT_API_KEY:  env.AI_DEFAULT_API_KEY || '',
   };
 }
 
