@@ -508,11 +508,21 @@
   }
 
   function renderTaskRow(it) {
-    const rem = remaining(it.deadline);
-    const cls = rem ? (rem.kind === 'overdue' ? 'timer overdue' : rem.kind === 'soon' ? 'timer soon' : 'timer') : 'timer';
+    // Для выполненных задач относительный таймер («просрочено 14д», «через 2ч»)
+    // не считаем — задача уже закрыта, дедлайн неактуален. Показываем только
+    // саму дату дедлайна, без красно-жёлтой подсветки.
+    const rem = it.done ? null : remaining(it.deadline);
+    const cls = rem
+        ? (rem.kind === 'overdue' ? 'timer overdue'
+          : rem.kind === 'soon'   ? 'timer soon'
+          : 'timer')
+        : 'timer';
     const tags = (it.tags||[]).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
     const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
     const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 200))}</div>` : '';
+    const deadlineSpan = it.deadline
+        ? `<span class="${cls}">${rem ? escapeHtml(rem.text) + ' · ' : ''}${escapeHtml(fmtTime(it.deadline))}</span>`
+        : '';
     return `
       <div class="swipe-item" data-id="${it.id}">
         <div class="swipe-actions">
@@ -528,13 +538,13 @@
             ${desc}
             <div class="item-meta">
               ${cat}${tags}
-              ${rem ? `<span class="${cls}">${escapeHtml(rem.text)} · ${escapeHtml(fmtTime(it.deadline))}</span>` : ''}
+              ${deadlineSpan}
             </div>
           </div>
         </div>
       </div>
     `;
-  }
+}
 
   function renderNoteRow(it) {
     const tags = (it.tags||[]).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
