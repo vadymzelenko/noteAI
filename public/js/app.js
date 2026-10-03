@@ -6,6 +6,15 @@
   const THEME_LABELS = { noir:'Noir', snow:'Snow', graphite:'Graphite', azure:'Azure', violet:'Violet', sage:'Sage' };
   const TRASH_TTL = 14 * 24 * 60 * 60 * 1000;
 
+  // Служебные записи в таблице items — настройки ИИ и хранилище ссылок.
+  // Хранятся там же, что обычные записи (без миграции БД), с фиксированными
+  // uuid'ами; вырезаем их из state.items сразу после загрузки, чтобы они не
+  // попадали в списки/поиск/метрики.
+  const SERVICE_IDS = new Set([
+    '00000000-0000-0000-0000-0000000a1a1a', // AI settings (см. ai.js)
+    '00000000-0000-0000-0000-0000000b2b2b', // Links       (см. links.js)
+  ]);
+
   // SVG-иконки (Feather-стиль) — используются вместо эмодзи в UI.
   const ICONS = {
     task: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
@@ -127,10 +136,8 @@
 
   function renderInline(text) {
     let s = escapeHtml(text);
-    // Изображения ![alt](url)
     s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, alt, url) =>
         `<img class="md-img" src="${escapeHtml(safeUrl(url))}" alt="${escapeHtml(alt)}" loading="lazy">`);
-    // Ссылки [label](url)
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) =>
         `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -146,10 +153,6 @@
 
     src = src.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, body) => {
       if (lang === 'chart') {
-        // Достаём все числа из строки, что бы вокруг них ни было —
-        // скобки, лишние пробелы, запятые — вместо наивного split(),
-        // который ломался на "[3, 7, 4, 9, 6]" (терял крайние числа
-        // из-за скобок и подхватывал лишний 0 из пустого "хвоста").
         const nums = (body.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
         blocks.push(renderChart(nums));
       } else {
@@ -173,13 +176,8 @@
     for (const raw of lines) {
       const ph = raw.match(/^\u0000B(\d+)\u0000$/);
       if (ph) { closeList(); out.push(blocks[+ph[1]]); continue; }
-      // Пустая строка сама по себе не должна разрывать список —
-      // иначе каждый пункт, отделённый пустой строкой, начинает
-      // нумерацию заново с 1. Список закроется естественным образом,
-      // как только встретится строка другого типа (см. ветки ниже).
       if (!raw.trim()) { continue; }
 
-      // Строка, целиком состоящая из URL: картинка или внешняя ссылка.
       const bare = raw.trim();
       if (/^https?:\/\/\S+$/.test(bare)) {
         closeList();
@@ -214,10 +212,9 @@
 
   const deleted = (it) => !!it.deleted;
   const draft = (it) => !!it.draft;
-  // Черновики (не сохранённые явно кнопкой «Сохранить») и удалённые записи
-  // ведут себя одинаково с точки зрения обычных списков/поиска/аналитики —
-  // они скрыты отовсюду и всплывают только в своих отдельных модалках
-  // («Черновики» / «Корзина»).
+  // Черновики и удалённые записи ведут себя одинаково с точки зрения
+  // обычных списков/поиска/аналитики — они скрыты отовсюду и всплывают
+  // только в своих отдельных модалках («Черновики» / «Корзина»).
   const hidden = (it) => deleted(it) || draft(it);
 
   function sortTasks(items) {
@@ -255,8 +252,6 @@
     el.className = 'sync-status ' + (kind || '');
     el.setAttribute('aria-label', text || '');
     el.title = text || '';
-    // «Сохранено»/ошибку гасим через пару секунд, «Сохранение…» держим,
-    // пока идёт запрос — иначе точка постоянно висит в шапке.
     if (kind === 'ok' || kind === 'err') {
       clearTimeout(syncStatusTimer);
       syncStatusTimer = setTimeout(() => {
@@ -330,15 +325,9 @@
       await DB.purgeExpired();
       await DB.purgeExpiredDrafts();
       const all = await DB.allItems();
-      // Служебная запись с настройками ИИ (см. ai.js) не должна попадать
-      // в обычные списки/фильтры/метрики — убираем её здесь один раз.
-
-      const SERVICE_IDS = new Set([
-        '00000000-0000-0000-0000-0000000a1a1a', // AI settings
-        '00000000-0000-0000-0000-0000000b2b2b', // Links
-      ]);
+      // Служебные записи (настройки ИИ, ссылки) не должны попадать в обычные
+      // списки/фильтры/метрики — убираем их здесь один раз.
       state.items = all.filter((x) => !SERVICE_IDS.has(x.id));
-
       setSyncStatus('Сохранено', 'ok');
     } catch (e) {
       console.error('[load]', e);
@@ -444,7 +433,6 @@
   function applyTheme(name) {
     state.theme = name;
     document.body.dataset.theme = name;
-    // Держим theme-color (цвет статус-бара PWA) в тон текущей теме.
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
       const bg = getComputedStyle(document.body).getPropertyValue('--bg').trim();
@@ -496,7 +484,6 @@
     return [...set].sort();
   }
 
-  // Поле «ИИ-добавление» живёт только в меню «Создать» — на главном экране оно дублировало его.
   const renderQuickAddBar = () => '';
 
   function renderFiltersPanel() {
@@ -533,9 +520,6 @@
   }
 
   function renderTaskRow(it) {
-    // Для выполненных задач относительный таймер («просрочено 14д», «через 2ч»)
-    // не считаем — задача уже закрыта, дедлайн неактуален. Показываем только
-    // саму дату дедлайна, без красно-жёлтой подсветки.
     const rem = it.done ? null : remaining(it.deadline);
     const cls = rem
         ? (rem.kind === 'overdue' ? 'timer overdue'
@@ -760,10 +744,7 @@
         const it = state.items.find((x) => x.id === el.dataset.toggle);
         if (!it) return;
         it.done = !it.done;
-        // Оптимистичный UI: перерисовываем сразу, не дожидаясь ответа сети —
-        // раньше ждали `await persist()` ДО render(), из-за чего галочка
-        // «зависала» до ответа сервера. Само сохранение идёт в фоне;
-        // при ошибке persist() уже показывает статус через setSyncStatus.
+        // Оптимистичный UI: перерисовываем сразу, не дожидаясь ответа сети.
         render();
         persist(it).catch((err) => console.error('[toggle]', err));
       });
@@ -974,8 +955,8 @@
      Тап по записи открывает РАЗВЁРНУТЫЙ ПРОСМОТР (режим 'view'): весь текст,
      параметры, дедлайн. Оттуда можно отметить выполненной, удалить или нажать
      «Изменить» — тогда та же карточка переходит в режим правки ('edit').
-     ИИ вызывается только при первом сохранении НОВОЙ записи (см. applyAiPolish)
-     и никогда — при просмотре или правке уже сохранённой записи. */
+     ИИ вызывается ТОЛЬКО явно — через кнопку «Изменить через ИИ» в тулбаре
+     редактора (см. runAiEdit). Никаких автоматических правок при сохранении. */
 
   const editor = {
     overlay: null, modal: null, viewEl: null,
@@ -983,17 +964,12 @@
     deadlineEl: null, importanceEl: null, fontEl: null,
     bodyEl: null, previewEl: null,
     mode: 'edit',        // 'view' | 'edit'
-    isNew: false,        // запись ещё ни разу не сохранена кнопкой → ИИ разрешён
-    impTouched: false,   // важность выбрана пользователем → ИИ её не меняет
   };
   let autosaveTimer = null;
 
   const IMP_LABEL = { green: 'Не срочно', yellow: 'Средне', red: 'Важно' };
   const parseTags = (v) => String(v || '').split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  const aiReady = () => !!(window.AI && AI.config.enabled && AI.prefs.auto && (AI.prefs.grammar || AI.prefs.meta));
-  const aiMetaOn = () => !!(window.AI && AI.config.enabled && AI.prefs.auto && AI.prefs.meta);
 
   function setEditorMode(mode) {
     editor.mode = mode;
@@ -1023,12 +999,8 @@
   }
 
   function openEditor(item, type) {
-    // id генерируется сразу при открытии и не меняется до закрытия — иначе
-    // двойной тап создавал бы дубликаты (см. историю бага «дублирующиеся заметки»).
     state.editingId = item ? item.id : uid();
     state.editingType = item ? item.type : type;
-    editor.isNew = !item || !!item.draft;
-    editor.impTouched = !!item && !item.draft;
 
     const t = item || {
       title: '', body: '', category: '', tags: [],
@@ -1053,10 +1025,8 @@
 
   function enterEditMode(focus) {
     setEditorMode('edit');
-    // Новая запись + ИИ сам заполнит параметры → не загромождаем экран, сворачиваем.
-    document.getElementById('editorParams').open = !(editor.isNew && aiMetaOn());
+    document.getElementById('editorParams').open = false;
     updateParamsSummary();
-    updateAiHint();
     updateCharCount();
     requestAnimationFrame(() => {
       autoGrow();
@@ -1103,18 +1073,6 @@
     el.textContent = parts.filter(Boolean).join(' · ');
   }
 
-  function updateAiHint() {
-    const el = document.getElementById('aiHint');
-    if (!el) return;
-    const show = editor.isNew && aiReady();
-    el.hidden = !show;
-    if (!show) return;
-    const p = AI.prefs, parts = [];
-    if (p.grammar) parts.push('поправит ошибки');
-    if (p.meta) parts.push('заполнит пустые параметры');
-    document.getElementById('aiHintText').textContent = `При сохранении ИИ ${parts.join(' и ')}.`;
-  }
-
   function updateCharCount() {
     const el = document.getElementById('charCount');
     if (!el || !editor.bodyEl) return;
@@ -1147,8 +1105,6 @@
     scheduleAutosave();
   }
 
-  // Оборачивает выделенный текст в markdown-маркеры (или вставляет шаблон,
-  // если ничего не выделено), а выделение ставит на сам текст.
   function wrapSelection(before, after, placeholder) {
     const ta = editor.bodyEl;
     const a = ta.selectionStart, b = ta.selectionEnd;
@@ -1228,8 +1184,7 @@
   }
 
   // saveLock не даёт двум сохранениям идти параллельно. Автосейв при занятом
-  // замке просто пропускается, а явное «Сохранить» ЖДЁТ его завершения —
-  // раньше оно молча выходило, и запись так и оставалась черновиком.
+  // замке просто пропускается, а явное «Сохранить» ЖДЁТ его завершения.
   let saveLock = false;
 
   async function persistFromEditor(isAutosave) {
@@ -1250,8 +1205,7 @@
       };
       readEditorInto(item);
       // Автосейв помечает новую запись как черновик (скрыта из списков и
-      // аналитики). Явное «Сохранить» снимает флаг — единственное место,
-      // где черновик становится настоящей задачей/заметкой.
+      // аналитики). Явное «Сохранить» снимает флаг.
       item.draft = isAutosave ? (item.draft !== false) : false;
       await persist(item);
       if (!isAutosave && window.Links) Links.ingestFromItem(item);
@@ -1266,86 +1220,8 @@
     autosaveTimer = setTimeout(() => persistFromEditor(true), 1500);
   }
 
-  // Фоновая ИИ-правка уже сохранённой записи. Работает по данным из
-// state.items, а не по DOM — редактор к этому моменту закрыт.
-// Правит запись на месте: обновляет state.items, сохраняет в БД,
-// перерисовывает список и показывает тост с возможностью отмены.
-  async function runAiPolishInBackground(itemId, { impTouched = false } = {}) {
-    const it0 = state.items.find((x) => x.id === itemId);
-    if (!it0) return;
-
-    // Снимок исходного состояния — для «Отменить» и для проверки, что
-    // запись не менялась, пока ИИ думал.
-    const startedAt = it0.updatedAt;
-    const before = {
-      title: it0.title,
-      body: it0.body,
-      category: it0.category,
-      tags: [...(it0.tags || [])],
-      importance: it0.importance,
-    };
-
-    let res;
-    try {
-      const categories = [...new Set([...allCategories('task'), ...allCategories('note')])];
-      res = await AI.polish({
-        type: it0.type,
-        title: before.title,
-        body: before.body,
-        category: before.category,
-        tags: before.tags,
-        needImportance: it0.type === 'task' && !impTouched,
-        categories,
-      });
-    } catch (e) {
-      // Таймаут/HTTP/сеть — молчим, запись уже сохранена как есть.
-      console.warn('[ai] background polish', e);
-      return;
-    }
-    if (!res) return;
-
-    // За время запроса могли: удалить запись, отредактировать её ещё раз,
-    // отправить в корзину, превратить в черновик. В этих случаях правку
-    // не применяем — молча выходим, чтобы не затереть чужие изменения.
-    const cur = state.items.find((x) => x.id === itemId);
-    if (!cur || cur.deleted || cur.draft) return;
-    if (cur.updatedAt !== startedAt) return;
-
-    // Редактор мог быть снова открыт на этой же записи — тоже не трогаем,
-    // чтобы не сбить пользователя посреди ввода.
-    if (state.editingId === itemId && editor.overlay.classList.contains('open')) return;
-
-    if (res.title !== undefined) cur.title = res.title;
-    if (res.body !== undefined) cur.body = res.body;
-    if (res.category !== undefined) cur.category = res.category;
-    if (res.tags) cur.tags = res.tags;
-    if (res.importance) cur.importance = res.importance;
-
-    try {
-      await persist(cur);
-    } catch (e) {
-      console.error('[ai] background persist', e);
-      return;
-    }
-    render();
-
-    toast('ИИ поправил запись', 'ok', 6000, {
-      label: 'Отменить',
-      onClick: async () => {
-        const c = state.items.find((x) => x.id === itemId);
-        if (!c) return;
-        c.title = before.title;
-        c.body = before.body;
-        c.category = before.category;
-        c.tags = before.tags;
-        if (c.type === 'task') c.importance = before.importance;
-        await persist(c);
-        render();
-        toast('Вернул как было', 'info');
-      },
-    });
-  }
-
+  // Сохранение мгновенное: без ИИ, без ожиданий. Просто закрываем окно,
+  // перерисовываем список и показываем тост.
   async function saveEditor() {
     clearTimeout(autosaveTimer);
     const saveBtn = document.getElementById('editorSave');
@@ -1357,22 +1233,10 @@
       const body = editor.bodyEl.value;
       if (!title && !body) { closeEditor(); return; }
 
-      // Решаем ДО закрытия редактора: editor.isNew и editor.impTouched
-      // сбрасываются в closeEditor(), а state.editingId становится null.
-      const runAi = editor.isNew && aiReady() && AI.shouldPolish({ title, body });
-      const impTouched = editor.impTouched;
-      const itemId = state.editingId;
-
-      // Сохраняем как есть и сразу закрываем окно — не ждём ИИ.
-      // Текст уже в state.items и на сервере, пользователь свободен.
       await persistFromEditor(false);
       closeEditor();
       render();
       toast('Сохранено', 'ok');
-
-      // ИИ правит в фоне — когда ответит, обновит запись и покажет
-      // отдельный тост с «Отменить». Ошибки/таймауты тихо проглатываются.
-      if (runAi && itemId) runAiPolishInBackground(itemId, { impTouched });
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = label; }
     }
@@ -1413,7 +1277,6 @@
     document.getElementById('editorCloseFoot').addEventListener('click', closeEditor);
     document.getElementById('editorDelete').addEventListener('click', deleteFromEditor);
     document.getElementById('editorEdit').addEventListener('click', () => {
-      editor.isNew = false; // правка уже сохранённой записи — без ИИ
       enterEditMode('body');
     });
     // Закрытие только крестиком/кнопками (клик по фону ничего не делает).
@@ -1425,7 +1288,6 @@
     // Выбор важности и шрифта — крупные сегменты вместо выпадающих списков.
     document.querySelectorAll('#importanceSeg .seg-opt').forEach((b) => {
       b.addEventListener('click', () => {
-        editor.impTouched = true;
         setImportance(b.dataset.imp);
         editor.importanceEl.dispatchEvent(new Event('input'));
       });
@@ -1448,7 +1310,7 @@
     });
     window.addEventListener('resize', () => { if (editor.overlay.classList.contains('open')) autoGrow(); });
 
-    document.querySelectorAll('.toolbar .tool').forEach((btn) => {
+    document.querySelectorAll('.toolbar .tool[data-md]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const md = btn.dataset.md;
         if (md === '**') wrapSelection('**', '**', 'жирный');
@@ -1509,7 +1371,6 @@
   }
   function bindTrash() {
     document.getElementById('trashClose').addEventListener('click', closeTrash);
-    // Закрытие только по крестику — клик по фону больше не закрывает окно.
     document.getElementById('trashEmptyBtn').addEventListener('click', async () => {
       if (!(await askConfirm({ title: 'Очистить корзину?', message: 'Все записи будут удалены безвозвратно.', actionText: 'Очистить' }))) return;
       const all = state.items.filter(deleted);
@@ -1519,12 +1380,6 @@
   }
 
   /* ====================== ЧЕРНОВИКИ ====================== */
-  // Черновики — записи, автосохранённые во время печати, но ни разу не
-  // подтверждённые явным нажатием «Сохранить» (см. persistFromEditor).
-  // Они скрыты из обычных списков/фильтров/аналитики (см. hidden()) и
-  // живут здесь, пока пользователь не откроет и не сохранит их явно,
-  // либо не удалит — иначе через 14 дней с момента создания они
-  // автоматически стираются (см. DB.purgeExpiredDrafts()).
 
   function openDrafts() {
     const o = document.getElementById('draftsOverlay');
@@ -1579,7 +1434,6 @@
   }
   function bindDrafts() {
     document.getElementById('draftsClose').addEventListener('click', closeDrafts);
-    // Закрытие только по крестику — клик по фону больше не закрывает окно.
     document.getElementById('draftsEmptyBtn').addEventListener('click', async () => {
       if (!(await askConfirm({ title: 'Удалить все черновики?', message: 'Действие нельзя отменить.', actionText: 'Удалить' }))) return;
       const all = state.items.filter((x) => draft(x) && !deleted(x));
@@ -1863,7 +1717,6 @@
     const overlay = document.getElementById('settingsOverlay');
     const close = () => { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden','true'); };
     document.getElementById('settingsClose').addEventListener('click', close);
-    // Закрытие только по крестику — клик по фону больше не закрывает окно.
 
     document.querySelectorAll('#settingsTabs button').forEach((b) => {
       b.addEventListener('click', () => switchSettingsTab(b.dataset.settingsTab));
@@ -1875,7 +1728,6 @@
         baseUrl: document.getElementById('aiBaseUrl').value.trim(),
         model: document.getElementById('aiModel').value.trim(),
       });
-      refreshAiPrefsForm();
       const remember = document.getElementById('aiRemember');
       if (remember && remember.checked) {
         if (!Auth.isSignedIn()) {
@@ -1911,7 +1763,6 @@
     }
 
     document.getElementById('metricsClose').addEventListener('click', closeMetrics);
-    // Закрытие только по крестику — клик по фону больше не закрывает окно.
 
     document.getElementById('settingsBtn').addEventListener('click', openSettingsModal);
 
@@ -1920,35 +1771,7 @@
     document.getElementById('navTrash').addEventListener('click', () => { closeSettingsModal(); openTrash(); });
     document.getElementById('navLinks').addEventListener('click', () => { closeSettingsModal(); openLinks(); });
 
-    bindAiPrefs();
     bindEmailSettings();
-  }
-
-  function refreshAiPrefsForm() {
-    const auto = document.getElementById('prefAuto');
-    if (!auto || !window.AI) return;
-    const p = AI.prefs, ready = AI.config.enabled;
-    auto.checked = p.auto;
-    document.getElementById('prefGrammar').checked = p.grammar;
-    document.getElementById('prefMeta').checked = p.meta;
-    auto.disabled = !ready;
-    document.querySelectorAll('[data-pref-sub] input').forEach((i) => { i.disabled = !ready || !p.auto; });
-    document.getElementById('aiPrefsNote').textContent = ready
-        ? `Осталось запросов в этот час: ${AI.callsLeft()} из 20.`
-        : 'Сначала подключи ИИ ниже: нужны Base URL и модель.';
-  }
-
-  function bindAiPrefs() {
-    const ids = ['prefAuto', 'prefGrammar', 'prefMeta'];
-    if (!window.AI || !ids.every((id) => document.getElementById(id))) return;
-    ids.forEach((id) => document.getElementById(id).addEventListener('change', () => {
-      AI.setPrefs({
-        auto: document.getElementById('prefAuto').checked,
-        grammar: document.getElementById('prefGrammar').checked,
-        meta: document.getElementById('prefMeta').checked,
-      });
-      refreshAiPrefsForm();
-    }));
   }
 
   function refreshEmailSettingsForm() {
@@ -2004,7 +1827,6 @@
     const overlay = document.getElementById('accountOverlay');
     const close = () => { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden','true'); };
     document.getElementById('accountClose').addEventListener('click', close);
-    // Закрытие только по крестику — клик по фону больше не закрывает окно.
     document.getElementById('accountBtn').addEventListener('click', () => {
       overlay.classList.add('open');
       overlay.setAttribute('aria-hidden', 'false');
@@ -2142,7 +1964,6 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     overlay.setAttribute('aria-hidden', 'false');
     switchSettingsTab('ai');
     refreshAiSettingsForm();
-    refreshAiPrefsForm();
     const rememberEl = document.getElementById('aiRemember');
     const rememberRow = document.getElementById('aiRememberRow');
     if (rememberEl) rememberEl.checked = false;
@@ -2178,7 +1999,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     renderAccountBody();
   }
 
-  /* --- Меню добавления (Задача / Заметка / ИИ) --- */
+  /* --- Меню добавления (Задача / Заметка / Ссылка / ИИ) --- */
   function openAddSheet() {
     const o = document.getElementById('addSheet');
     o.classList.add('open');
@@ -2215,6 +2036,128 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     sendBtn.addEventListener('click', run);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAddSheet(); });
+  }
+
+  /* ====================== ИЗМЕНИТЬ ЧЕРЕЗ ИИ (кнопка в редакторе) ====================== */
+
+  let aiEditBusy = false;
+
+  function openAiEditSheet() {
+    if (!window.AI || !AI.config.enabled) {
+      toast('ИИ не настроен — открой «Настройки» → ИИ', 'err');
+      return;
+    }
+    const o = document.getElementById('aiEditSheet');
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+    const custom = document.getElementById('aiEditCustomInput');
+    if (custom) custom.value = '';
+  }
+
+  function closeAiEditSheet() {
+    const o = document.getElementById('aiEditSheet');
+    if (!o) return;
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+  }
+
+  function setAiEditBusy(busy) {
+    aiEditBusy = !!busy;
+    const btn = document.getElementById('aiEditBtn');
+    if (btn) {
+      btn.classList.toggle('loading', aiEditBusy);
+      btn.disabled = aiEditBusy;
+    }
+  }
+
+  async function runAiEdit(action, customPrompt) {
+    if (aiEditBusy) return;
+    if (!window.AI || !AI.config.enabled) {
+      toast('ИИ не подключён', 'err');
+      return;
+    }
+
+    const title = editor.titleEl.value.trim();
+    const body  = editor.bodyEl.value;
+
+    if (action !== 'title' && !body.trim()) {
+      toast('Сначала напиши текст — потом правь через ИИ', 'err');
+      return;
+    }
+    if (action === 'title' && !title && !body.trim()) {
+      toast('Пустая запись — ИИ нечего править', 'err');
+      return;
+    }
+
+    // Снимок для «Отменить».
+    const before = { title, body };
+
+    closeAiEditSheet();
+    setAiEditBusy(true);
+
+    let res;
+    try {
+      res = await AI.editText({ action, customPrompt, title, body });
+    } catch (e) {
+      console.warn('[ai-edit]', e);
+      toast('ИИ не справился: ' + (e.message || 'ошибка'), 'err', 5000);
+      setAiEditBusy(false);
+      return;
+    }
+    setAiEditBusy(false);
+
+    // Пока ИИ думал, редактор могли закрыть или переключить на другую запись.
+    // В этом случае правку просто выбрасываем.
+    if (!editor.overlay.classList.contains('open') || editor.mode !== 'edit') return;
+
+    if (res.title !== undefined && res.title) editor.titleEl.value = res.title;
+    if (res.body !== undefined && res.body) editor.bodyEl.value = res.body;
+
+    onBodyChanged();
+    autoGrow();
+    updateParamsSummary();
+    scheduleAutosave();
+
+    toast('ИИ поправил текст', 'ok', 6000, {
+      label: 'Отменить',
+      onClick: () => {
+        if (editor.titleEl) editor.titleEl.value = before.title;
+        if (editor.bodyEl)  editor.bodyEl.value  = before.body;
+        onBodyChanged();
+        autoGrow();
+        scheduleAutosave();
+        toast('Вернул как было', 'info');
+      },
+    });
+  }
+
+  function bindAiEdit() {
+    const btn = document.getElementById('aiEditBtn');
+    if (!btn) return;
+
+    btn.addEventListener('click', openAiEditSheet);
+    document.getElementById('aiEditCancel').addEventListener('click', closeAiEditSheet);
+
+    document.querySelectorAll('#aiEditSheet [data-ai-action]').forEach((b) => {
+      b.addEventListener('click', () => runAiEdit(b.dataset.aiAction, null));
+    });
+
+    const custom = document.getElementById('aiEditCustomInput');
+    const customBtn = document.getElementById('aiEditCustomBtn');
+    const fire = () => {
+      const text = custom.value.trim();
+      if (!text) { custom.focus(); return; }
+      runAiEdit('custom', text);
+    };
+    customBtn.addEventListener('click', fire);
+    custom.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); fire(); }
+    });
+
+    // Закрытие по клику на фон.
+    document.getElementById('aiEditSheet').addEventListener('click', (e) => {
+      if (e.target.id === 'aiEditSheet') closeAiEditSheet();
+    });
   }
 
   /* ====================== КОМАНДНАЯ ПАЛИТРА (⌘/Ctrl+K) ====================== */
@@ -2468,7 +2411,6 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     const input = document.getElementById('searchInput');
     input.addEventListener('input', () => renderSearch(input.value));
 
-    // Фильтры поиска: тип / важность / категория
     document.querySelectorAll('#searchType button').forEach((b) => {
       b.addEventListener('click', () => {
         state.filter.type = b.dataset.type;
@@ -2528,9 +2470,6 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
 
   /* ====================== ЭКРАННАЯ КЛАВИАТУРА ====================== */
 
-  // На iOS клавиатура не меняет высоту окна (dvh её не учитывает) — окно
-  // записи уезжало под клавиатуру, а кнопка «Сохранить» пропадала. Следим
-  // за visualViewport и отдаём CSS реальную видимую высоту и смещение.
   function bindViewport() {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -2556,10 +2495,17 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
   function bindHotkeys() {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        // 1. Палитра — она перекрывает всё.
         const palette = document.getElementById('paletteOverlay');
         if (palette && palette.classList.contains('open')) { closePalette(); return; }
-        if (editor.overlay.classList.contains('open')) closeEditor();
+        // 2. Лист «Изменить через ИИ» — поверх редактора.
+        const aiSheet = document.getElementById('aiEditSheet');
+        if (aiSheet && aiSheet.classList.contains('open')) { closeAiEditSheet(); return; }
+        // 3. Редактор — закрываем и выходим, чтобы не трогать другие модалки.
+        if (editor.overlay.classList.contains('open')) { closeEditor(); return; }
+        // 4. Всё остальное — закрываем стандартные модалки.
         document.querySelectorAll('.modal-overlay.open').forEach((o) => { o.classList.remove('open'); o.setAttribute('aria-hidden','true'); });
+        return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -2629,6 +2575,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     bindScrollLock();
     bindViewport();
     bindAddSheet();
+    bindAiEdit();
 
     document.getElementById('themeBtn').addEventListener('click', cycleTheme);
     document.querySelectorAll('#modeTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));

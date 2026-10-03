@@ -5,24 +5,17 @@
 // в Supabase (служебная запись в таблице items — БЕЗ миграции БД: это
 // обычная строка в уже существующей таблице items, просто с фиксированным
 // служебным id, которая не попадает в обычные списки/фильтры/метрики —
-// app.js вылавливает и убирает её из state.items сразу при загрузке),
-// чтобы не вводить провайдера/модель/ключ заново на каждом устройстве.
+// app.js вылавливает и убирает её из state.items сразу при загрузке).
 (function () {
     'use strict';
 
     const KEY = 'ai.config';
-    // FIX: id служебной записи — валидный UUID, потому что колонка items.id
-    // имеет тип uuid (не text). Раньше тут была строка '__ai_settings__',
-    // и Postgres отбивал каждый запрос с ошибкой 400
-    // "invalid input syntax for type uuid". UUID выбран «фиксированный»,
-    // чтобы запись всегда была одна и та же — и не пересекалась
-    // со случайными crypto.randomUUID() у обычных записей.
+    // Валидный UUID — колонка items.id имеет тип uuid, поэтому строку
+    // '__ai_settings__' туда вставить нельзя (Postgres отдаёт 400).
     const CLOUD_RECORD_ID = '00000000-0000-0000-0000-0000000a1a1a';
 
-    // FIX: общий таймаут на любой вызов ИИ. Раньше 30с стояло только в
-    // polish() — теперь это дефолт complete(), и все вызывающие
-    // (test, editText, createFromText, …) тоже защищены от вечного
-    // ожидания. 60с хватает даже медленным бесплатным моделям.
+    // Общий таймаут на любой вызов ИИ. 60 с хватает даже медленным
+    // бесплатным моделям; для коротких запросов (test) ставим 15 с.
     const DEFAULT_TIMEOUT_MS = 60000;
 
     const config = {
@@ -33,16 +26,13 @@
     };
 
     function load() {
-        // 1. Дефолты из серверного конфига (.env)
         const env = window.NF_CONFIG || {};
         if (env.AI_DEFAULT_MODEL)    config.model    = env.AI_DEFAULT_MODEL;
         if (env.AI_DEFAULT_BASE_URL) config.baseUrl  = env.AI_DEFAULT_BASE_URL;
         if (env.AI_DEFAULT_API_KEY)  config.apiKey   = env.AI_DEFAULT_API_KEY;
 
-        // 2. Перекрываем пользовательскими настройками, сохранёнными локально.
-        // FIX: мержим только НЕПУСТЫЕ значения из localStorage — иначе
-        // случайно сохранённая пустая конфигурация (например, пользователь
-        // нажал «Сохранить» с пустыми полями) затирала бы дефолты из .env.
+        // Мержим только непустые значения из localStorage — иначе случайно
+        // сохранённая пустая конфигурация затирала бы дефолты из .env.
         try {
             const raw = localStorage.getItem(KEY);
             if (raw) {
@@ -62,13 +52,6 @@
         return { ...config };
     }
 
-    // Читает конфиг ИИ, сохранённый в аккаунте (Supabase), если пользователь
-    // вошёл. По явному запросу пользователя ключ теперь тоже сохраняется
-    // в этой записи (см. saveToCloud) — это позволяет не вводить его заново
-    // на каждом устройстве, но означает, что ключ хранится в БД в теле
-    // служебной записи (не в открытом виде на экране, но и не зашифрован
-    // отдельным секретом) — при компрометации Supabase-проекта он утечёт
-    // вместе с обычными данными, как и любое другое поле в таблице items.
     async function loadFromCloud() {
         if (!window.Auth || !window.Auth.isSignedIn() || !window.DB) return false;
         try {
@@ -92,11 +75,6 @@
         }
     }
 
-    // Сохраняет конфиг (провайдер/модель/baseUrl/ключ) в аккаунт пользователя,
-    // чтобы не настраивать ИИ заново на каждом устройстве. Хранится в той же
-    // таблице items, что и обычные записи (служебная строка с фиксированным
-    // id) — БЕЗ миграции БД: никаких новых таблиц или колонок не требуется,
-    // используется уже существующая колонка body (JSON-строка).
     async function saveToCloud() {
         if (!window.Auth || !window.Auth.isSignedIn()) throw new Error('Нужно войти в аккаунт');
         const sb = window.Auth.client;
@@ -124,7 +102,6 @@
         if (error) throw error;
     }
 
-    // Удаляет сохранённый в аккаунте ключ (например, при явном сбросе).
     async function clearCloud() {
         if (!window.Auth || !window.Auth.isSignedIn()) return;
         const sb = window.Auth.client;
@@ -134,20 +111,14 @@
 
     function endpoint() {
         let base = (config.baseUrl || '').replace(/\/+$/, '');
-        // Если пользователь вставил полный endpoint до /chat/completions — не дублируем.
         if (/\/chat\/completions$/.test(base)) base = base.replace(/\/chat\/completions$/, '');
         return base;
     }
 
-    // Универсальный OpenAI-совместимый вызов (OpenRouter, OpenAI, Groq, локальные
-    // серверы вроде Ollama/LM Studio). Возвращает строку-ответ. Для настройки
-    // достаточно baseUrl + model, apiKey — если провайдер его требует.
-    //
-    // FIX: теперь complete() сам управляет таймаутом (opts.timeoutMs,
-    // по умолчанию 60с), а внешний signal из opts.signal корректно
-    // «пробрасывается» во внутренний AbortController. На AbortError
-    // отдаём человекочитаемую ошибку вместо сырого
-    // "signal is aborted without reason".
+    // Универсальный OpenAI-совместимый вызов (OpenRouter, OpenAI, Groq,
+    // локальные серверы вроде Ollama/LM Studio). Возвращает строку-ответ.
+    // Управляет таймаутом сам (opts.timeoutMs, по умолчанию 60 с),
+    // внешний signal из opts.signal корректно пробрасывается внутрь.
     async function complete(prompt, opts = {}) {
         if (!config.enabled) throw new Error('ИИ не подключён — укажи base_url и модель');
 
@@ -159,17 +130,9 @@
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(new Error('AI timeout')), timeoutMs);
 
-        // Пробрасываем внешний signal (если был) во внутренний контроллер.
         if (opts.signal) {
-            if (opts.signal.aborted) {
-                ctl.abort(opts.signal.reason);
-            } else {
-                opts.signal.addEventListener(
-                    'abort',
-                    () => ctl.abort(opts.signal.reason),
-                    { once: true }
-                );
-            }
+            if (opts.signal.aborted) ctl.abort(opts.signal.reason);
+            else opts.signal.addEventListener('abort', () => ctl.abort(opts.signal.reason), { once: true });
         }
 
         let res;
@@ -194,12 +157,10 @@
             });
         } catch (e) {
             clearTimeout(timer);
-            // FIX: единая понятная ошибка на любые случаи отмены/таймаута —
-            // и на наш таймер, и на внешний AbortController.
             if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message)))) {
                 throw new Error(
                     `ИИ не ответил за ${Math.round(timeoutMs / 1000)} с — ` +
-                    `упрости запрос или смени модель на более быструю`
+                    `попробуй ещё раз или смени модель на более быструю`
                 );
             }
             throw e;
@@ -213,8 +174,6 @@
             }
 
             if (opts.stream) {
-                // Стрим по SSE: собираем delta.content из чанков. Используется редко,
-                // но оставлено для совместимости, если вызывающий захочет прогресс.
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let out = '', buf = '';
@@ -246,7 +205,7 @@
         }
     }
 
-    /* --- Точки расширения --- */
+    /* --- Мелкие утилиты (используются где-то ещё в проекте) --- */
 
     async function suggestTags(text) {
         if (!config.enabled) return [];
@@ -281,12 +240,11 @@
 
     async function test() {
         if (!config.enabled) throw new Error('ИИ не настроен');
-        // Короткий тестовый запрос — 15 секунд более чем достаточно.
         const out = await complete('Ответь одним словом: ok', { maxTokens: 10, timeoutMs: 15000 });
         return out.trim();
     }
 
-    /* --- Редактирование текста записи --- */
+    /* --- Явное редактирование текста записи по кнопке «Изменить через ИИ» --- */
 
     const QUICK_ACTION_PROMPTS = {
         rewrite: 'Перефразируй этот текст качественнее — сохрани смысл, но сделай формулировки более чёткими и живыми. Сохрани markdown-разметку (заголовки, списки, код, таблицы), если она есть.',
@@ -296,14 +254,18 @@
         title: 'Придумай короткий, ёмкий заголовок (до 6 слов) для этой записи. Ответь только заголовком, без кавычек и пояснений.',
     };
 
-    // Правит/дополняет текст записи (title+body). Возвращает { title?, body }.
+    // Правит/дополняет текст записи. Возвращает { title?, body }.
+    // action: 'rewrite' | 'grammar' | 'expand' | 'shorten' | 'title' | 'custom'
     async function editText({ action, customPrompt, title, body }) {
         if (!config.enabled) throw new Error('ИИ не подключён');
 
         if (action === 'title') {
             const newTitle = await complete(
                 `${QUICK_ACTION_PROMPTS.title}\n\nТекущий заголовок: ${title || '(нет)'}\nТекст записи:\n${body || '(пусто)'}`,
-                { maxTokens: 30, system: 'Ты помогаешь пользователю вести задачи и заметки в приложении NodeFlow. Отвечай только результатом, без вступлений и пояснений.' }
+                {
+                    maxTokens: 30,
+                    system: 'Ты помогаешь пользователю вести задачи и заметки в приложении NodeFlow. Отвечай только результатом, без вступлений и пояснений.',
+                }
             );
             return { title: newTitle.trim().replace(/^["'«]|["'»]$/g, '') };
         }
@@ -320,14 +282,12 @@
 
         const prompt = `Инструкция: ${instruction}\n\nТекущий текст записи${title ? ` (заголовок: "${title}")` : ''}:\n${body || '(пусто)'}`;
 
-        const out = await complete(prompt, { maxTokens: 1200, system });
+        const out = await complete(prompt, { maxTokens: 1500, system });
         return { body: out.trim() };
     }
 
-    /* --- Создание записи из свободного текста --- */
+    /* --- Создание записи из свободного текста (кнопка «Добавить через ИИ») --- */
 
-    // Разбирает произвольную фразу пользователя в готовую запись.
-    // Возвращает { type, title, body, importance, deadline (ms|null), category, tags }
     async function createFromText(text) {
         if (!config.enabled) throw new Error('ИИ не подключён');
 
@@ -364,166 +324,6 @@
         };
     }
 
-
-    /* --- Умная правка при СОЗДАНИИ записи ---
-       Один запрос на запись, только при первом сохранении, только если
-       включено в настройках. Исправляет орфографию/пунктуацию и заполняет
-       ПУСТЫЕ поля (категория, теги, важность) — то, что пользователь уже
-       указал сам, ИИ не трогает. Защита от лишних трат и порчи текста:
-       пропуск коротких/очень длинных текстов, лимит запросов в час,
-       таймаут, проверка, что ИИ не пересказал текст и не сломал код/ссылки. */
-
-    const PREFS_KEY = 'nf.ai.prefs';
-    const USAGE_KEY = 'nf.ai.usage';
-    const MAX_CALLS_PER_HOUR = 20;
-    const MIN_LETTERS = 12;
-    const MAX_BODY = 5000;
-    const prefs = { auto: true, grammar: true, meta: true };
-
-    function loadPrefs() {
-        try { Object.assign(prefs, JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')); } catch { /* ignore */ }
-    }
-    function setPrefs(p) {
-        Object.assign(prefs, p);
-        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-        return { ...prefs };
-    }
-    function recentCalls() {
-        const now = Date.now();
-        let arr;
-        try { arr = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]'); } catch { arr = []; }
-        return arr.filter((t) => now - t < 3600000);
-    }
-    const callsLeft = () => MAX_CALLS_PER_HOUR - recentCalls().length;
-    function takeSlot() {
-        const arr = recentCalls();
-        if (arr.length >= MAX_CALLS_PER_HOUR) return false;
-        arr.push(Date.now());
-        localStorage.setItem(USAGE_KEY, JSON.stringify(arr));
-        return true;
-    }
-    // FIX: возврат слота квоты при неудачном запросе. Раньше takeSlot()
-    // вызывался ДО complete(), и если запрос падал (таймаут, 4xx, ошибка
-    // сети), слот «сгорал» — 20 неудачных попыток в час, и квота пустела,
-    // хотя ни одного ответа от модели так и не пришло.
-    function refundSlot() {
-        try {
-            const arr = recentCalls();
-            arr.pop(); // убираем последний добавленный timestamp
-            localStorage.setItem(USAGE_KEY, JSON.stringify(arr));
-        } catch { /* ignore */ }
-    }
-
-    const urlsOf = (t) => (String(t).match(/https?:\/\/[^\s)]+/g) || []).sort().join('|');
-    const fencesOf = (t) => (String(t).match(/```/g) || []).length;
-
-    // Быстрая проверка без сети: стоит ли вообще трогать эту запись.
-    function shouldPolish({ title = '', body = '' }) {
-        if (!config.enabled || !prefs.auto || !(prefs.grammar || prefs.meta)) return false;
-        const letters = ((title + body).match(/\p{L}/gu) || []).length;
-        return letters >= MIN_LETTERS && body.length <= MAX_BODY && callsLeft() > 0;
-    }
-
-    async function polish({ type, title, body, category, tags, needImportance, categories = [] }) {
-        if (!shouldPolish({ title, body })) return null;
-
-        const wantGrammar = prefs.grammar;
-        const wantCategory = prefs.meta && !category;
-        const wantTags = prefs.meta && !(tags && tags.length);
-        const wantImportance = prefs.meta && type === 'task' && !!needImportance;
-        if (!wantGrammar && !wantCategory && !wantTags && !wantImportance) return null;
-        if (!takeSlot()) return null;
-
-        const fields = [];
-        if (wantGrammar) fields.push('"title":"исправленный заголовок","body":"исправленный текст"');
-        if (wantCategory) fields.push('"category":"категория: 1–2 слова"');
-        if (wantTags) fields.push('"tags":["до 4 коротких тегов в нижнем регистре"]');
-        if (wantImportance) fields.push('"importance":"red|yellow|green"');
-
-        const rules = [];
-        if (wantGrammar) rules.push(
-            'Исправляй ТОЛЬКО орфографию, пунктуацию и грамматику. Не перефразируй, не сокращай, не дополняй, не меняй тон. ' +
-            'Markdown-разметку, блоки кода, ссылки, числа, имена и эмодзи оставляй как есть. Если ошибок нет — верни текст без изменений.');
-        if (wantCategory && categories.length) rules.push(
-            'Для категории по возможности выбери одну из уже существующих: ' + categories.slice(0, 12).join(', ') + '. Новую придумывай, только если ничего не подходит.');
-        if (wantImportance) rules.push(
-            'importance: red — срочно или горят сроки, yellow — обычное дело, green — можно не спешить.');
-
-        const system = 'Ты аккуратный редактор в приложении задач и заметок. ' +
-            'Отвечай СТРОГО одним валидным JSON-объектом без пояснений и без ```. ' +
-            'Формат: {' + fields.join(',') + '}. ' + rules.join(' ');
-
-        // Если грамматика не нужна, для категории/тегов хватает начала текста.
-        const text = wantGrammar ? body : body.slice(0, 1500);
-        const prompt = 'Тип записи: ' + (type === 'task' ? 'задача' : 'заметка') +
-            '\nЗаголовок: ' + (title || '(нет)') + '\nТекст:\n' + text;
-
-        // FIX: таймаут 60 с и управление слотом квоты теперь здесь, но
-        // AbortController переехал внутрь complete() (см. DEFAULT_TIMEOUT_MS).
-        // При любой ошибке (таймаут, HTTP, сеть) возвращаем слот и
-        // прокидываем понятную ошибку наверх — вызывающий код (applyAiPolish
-        // в app.js) её поймает и просто сохранит запись без правок.
-        let raw;
-        try {
-            raw = await complete(prompt, {
-                system,
-                timeoutMs: 60000,
-                // FIX: убрал Math.min(3000, …) — для бесплатных моделей
-                // генерация 3000 токенов гарантированно не укладывается в
-                // разумное время. 1500 хватает для «полировки» даже
-                // длинных заметок, и запрос стабильно успевает.
-                maxTokens: Math.min(1500, Math.ceil(body.length / 2) + 400),
-            });
-        } catch (e) {
-            refundSlot();
-            throw e;
-        }
-
-        console.log('[ai] polish raw:', raw);
-
-        let data;
-        try {
-            const cleaned = raw
-                .replace(/<think>[\s\S]*?<\/think>/gi, '')
-                .replace(/```json|```/g, '');
-            const m = cleaned.match(/\{[\s\S]*\}/);
-            data = JSON.parse(m ? m[0] : cleaned);
-        } catch {
-            console.warn('[ai] polish: не JSON', raw);
-            return null;
-        }
-
-        const out = {};
-        if (wantGrammar) {
-            if (typeof data.body === 'string' && data.body.trim() && data.body !== body) {
-                const ratio = data.body.length / Math.max(1, body.length);
-                const sane = (body.length < 40 || (ratio > 0.75 && ratio < 1.3))
-                    && fencesOf(data.body) === fencesOf(body)
-                    && urlsOf(data.body) === urlsOf(body);
-                if (sane) out.body = data.body.trim();
-            }
-            if (typeof data.title === 'string' && title && data.title.trim() && data.title !== title) {
-                const t = data.title.trim();
-                if (t.length <= title.length * 1.3 + 5 && t.length >= title.length * 0.7 - 5) out.title = t;
-            }
-        }
-        if (wantCategory && typeof data.category === 'string') {
-            const c = data.category.trim().replace(/^["'«#]|["'»]$/g, '');
-            if (c && c.length <= 30) out.category = c;
-        }
-        if (wantTags && Array.isArray(data.tags)) {
-            const t = [...new Set(data.tags
-                .map((x) => String(x).trim().replace(/^#/, '').toLowerCase())
-                .filter((x) => x && x.length <= 24))].slice(0, 4);
-            if (t.length) out.tags = t;
-        }
-        if (wantImportance && ['red', 'yellow', 'green'].includes(data.importance)) out.importance = data.importance;
-
-        return Object.keys(out).length ? out : null;
-    }
-
-    loadPrefs();
-
     load();
 
     window.AI = {
@@ -532,7 +332,6 @@
         save, load, complete,
         suggestTags, summarize, parseTask, suggestDeadline, test,
         editText, createFromText,
-        get prefs() { return { ...prefs }; }, setPrefs, shouldPolish, polish, callsLeft,
         loadFromCloud, saveToCloud, clearCloud,
     };
 })();

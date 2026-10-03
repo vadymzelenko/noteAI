@@ -1937,3 +1937,50 @@ html { max-width: 100%; overflow-x: hidden; }
   .mode-tabs button { font-size: 14px; padding: 0 6px; }
   .seg-opt { font-size: 13px; padding: 8px; gap: 6px; }
 }
+
+/* ============================================================
+   Кнопка «Изменить через ИИ» и её action-sheet
+   ============================================================ */
+.tool-ai { color: var(--accent); }
+.tool-ai:hover { background: var(--accent-soft); border-color: var(--accent); }
+.tool-ai.loading {
+  pointer-events: none;
+  opacity: .6;
+}
+.tool-ai.loading svg {
+  animation: ai-spin 1s linear infinite;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+
+.ai-edit-sheet { max-width: 460px; }
+.ai-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ai-edit-grid .sheet-btn { padding: 14px; font-size: 15px; }
+.ai-edit-grid .sheet-btn:nth-child(5) { grid-column: span 2; }
+
+.ai-edit-custom {
+  display: flex;
+  gap: 8px;
+}
+.ai-edit-custom input {
+  flex: 1; min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px; outline: none;
+  transition: border-color .12s var(--ease);
+}
+.ai-edit-custom input:focus { border-color: var(--border-strong); }
+.ai-edit-custom input::placeholder { color: var(--muted); }
+.ai-edit-custom .btn { padding: 12px 16px; }
+
+@media (max-width: 720px) {
+  .ai-edit-grid { grid-template-columns: 1fr; }
+  .ai-edit-grid .sheet-btn:nth-child(5) { grid-column: auto; }
+  .ai-edit-custom { flex-direction: column; }
+}
