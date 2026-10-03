@@ -11,11 +11,19 @@
     'use strict';
 
     const KEY = 'ai.config';
-    // Фиксированный id служебной записи-контейнера для настроек ИИ.
-    // Она хранится в той же таблице items (без миграций БД), но помечена
-    // самим id и никогда не участвует в обычных списках/фильтрах/метриках —
-    // app.js вылавливает и убирает её из state.items сразу при загрузке.
-    const CLOUD_RECORD_ID = '__ai_settings__';
+    // FIX: id служебной записи — валидный UUID, потому что колонка items.id
+    // имеет тип uuid (не text). Раньше тут была строка '__ai_settings__',
+    // и Postgres отбивал каждый запрос с ошибкой 400
+    // "invalid input syntax for type uuid". UUID выбран «фиксированный»,
+    // чтобы запись всегда была одна и та же — и не пересекалась
+    // со случайными crypto.randomUUID() у обычных записей.
+    const CLOUD_RECORD_ID = '00000000-0000-0000-0000-0000000a1a1a';
+
+    // FIX: общий таймаут на любой вызов ИИ. Раньше 30с стояло только в
+    // polish() — теперь это дефолт complete(), и все вызывающие
+    // (test, editText, createFromText, …) тоже защищены от вечного
+    // ожидания. 60с хватает даже медленным бесплатным моделям.
+    const DEFAULT_TIMEOUT_MS = 60000;
 
     const config = {
         baseUrl: '',   // OpenAI-совместимый endpoint, напр. https://openrouter.ai/api/v1
@@ -31,10 +39,18 @@
         if (env.AI_DEFAULT_BASE_URL) config.baseUrl  = env.AI_DEFAULT_BASE_URL;
         if (env.AI_DEFAULT_API_KEY)  config.apiKey   = env.AI_DEFAULT_API_KEY;
 
-        // 2. Перекрываем пользовательскими настройками, сохранёнными локально
+        // 2. Перекрываем пользовательскими настройками, сохранёнными локально.
+        // FIX: мержим только НЕПУСТЫЕ значения из localStorage — иначе
+        // случайно сохранённая пустая конфигурация (например, пользователь
+        // нажал «Сохранить» с пустыми полями) затирала бы дефолты из .env.
         try {
             const raw = localStorage.getItem(KEY);
-            if (raw) Object.assign(config, JSON.parse(raw));
+            if (raw) {
+                const saved = JSON.parse(raw) || {};
+                if (saved.baseUrl) config.baseUrl = saved.baseUrl;
+                if (saved.model)   config.model   = saved.model;
+                if (saved.apiKey)  config.apiKey  = saved.apiKey;
+            }
         } catch { /* ignore */ }
 
         config.enabled = !!(config.baseUrl && config.model);
@@ -126,67 +142,108 @@
     // Универсальный OpenAI-совместимый вызов (OpenRouter, OpenAI, Groq, локальные
     // серверы вроде Ollama/LM Studio). Возвращает строку-ответ. Для настройки
     // достаточно baseUrl + model, apiKey — если провайдер его требует.
+    //
+    // FIX: теперь complete() сам управляет таймаутом (opts.timeoutMs,
+    // по умолчанию 60с), а внешний signal из opts.signal корректно
+    // «пробрасывается» во внутренний AbortController. На AbortError
+    // отдаём человекочитаемую ошибку вместо сырого
+    // "signal is aborted without reason".
     async function complete(prompt, opts = {}) {
         if (!config.enabled) throw new Error('ИИ не подключён — укажи base_url и модель');
 
         const base = endpoint();
         const model  = opts.model || config.model;
         const system = opts.system || 'Ты — ассистент NodeFlow. Отвечай кратко и по делу.';
+        const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
 
-        const res = await fetch(`${base}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
-            },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: 'system', content: system },
-                    { role: 'user',   content: prompt },
-                ],
-                max_tokens: opts.maxTokens || 512,
-                ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
-                ...(opts.stream ? { stream: true } : {}),
-            }),
-            ...(opts.signal ? { signal: opts.signal } : {}),
-        });
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(new Error('AI timeout')), timeoutMs);
 
-        if (!res.ok) {
-            let detail = '';
-            try { const j = await res.json(); detail = j?.error?.message || j?.message || ''; } catch {}
-            throw new Error(detail || ('AI HTTP ' + res.status));
-        }
-
-        if (opts.stream) {
-            // Стрим по SSE: собираем delta.content из чанков. Используется редко,
-            // но оставлено для совместимости, если вызывающий захочет прогресс.
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder();
-            let out = '', buf = '';
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buf += decoder.decode(value, { stream: true });
-                const parts = buf.split('\n');
-                buf = parts.pop();
-                for (const line of parts) {
-                    const s = line.trim();
-                    if (!s.startsWith('data:')) continue;
-                    const payload = s.slice(5).trim();
-                    if (payload === '[DONE]') continue;
-                    try {
-                        const j = JSON.parse(payload);
-                        const delta = j.choices?.[0]?.delta?.content;
-                        if (delta) out += delta;
-                    } catch { /* ignore */ }
-                }
+        // Пробрасываем внешний signal (если был) во внутренний контроллер.
+        if (opts.signal) {
+            if (opts.signal.aborted) {
+                ctl.abort(opts.signal.reason);
+            } else {
+                opts.signal.addEventListener(
+                    'abort',
+                    () => ctl.abort(opts.signal.reason),
+                    { once: true }
+                );
             }
-            return out;
         }
 
-        const data = await res.json();
-        return data.choices?.[0]?.message?.content || '';
+        let res;
+        try {
+            res = await fetch(`${base}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        { role: 'system', content: system },
+                        { role: 'user',   content: prompt },
+                    ],
+                    max_tokens: opts.maxTokens || 512,
+                    ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+                    ...(opts.stream ? { stream: true } : {}),
+                }),
+                signal: ctl.signal,
+            });
+        } catch (e) {
+            clearTimeout(timer);
+            // FIX: единая понятная ошибка на любые случаи отмены/таймаута —
+            // и на наш таймер, и на внешний AbortController.
+            if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message)))) {
+                throw new Error(
+                    `ИИ не ответил за ${Math.round(timeoutMs / 1000)} с — ` +
+                    `упрости запрос или смени модель на более быструю`
+                );
+            }
+            throw e;
+        }
+
+        try {
+            if (!res.ok) {
+                let detail = '';
+                try { const j = await res.json(); detail = j?.error?.message || j?.message || ''; } catch {}
+                throw new Error(detail || ('AI HTTP ' + res.status));
+            }
+
+            if (opts.stream) {
+                // Стрим по SSE: собираем delta.content из чанков. Используется редко,
+                // но оставлено для совместимости, если вызывающий захочет прогресс.
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let out = '', buf = '';
+                for (;;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buf += decoder.decode(value, { stream: true });
+                    const parts = buf.split('\n');
+                    buf = parts.pop();
+                    for (const line of parts) {
+                        const s = line.trim();
+                        if (!s.startsWith('data:')) continue;
+                        const payload = s.slice(5).trim();
+                        if (payload === '[DONE]') continue;
+                        try {
+                            const j = JSON.parse(payload);
+                            const delta = j.choices?.[0]?.delta?.content;
+                            if (delta) out += delta;
+                        } catch { /* ignore */ }
+                    }
+                }
+                return out;
+            }
+
+            const data = await res.json();
+            return data.choices?.[0]?.message?.content || '';
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     /* --- Точки расширения --- */
@@ -224,7 +281,8 @@
 
     async function test() {
         if (!config.enabled) throw new Error('ИИ не настроен');
-        const out = await complete('Ответь одним словом: ok', { maxTokens: 10 });
+        // Короткий тестовый запрос — 15 секунд более чем достаточно.
+        const out = await complete('Ответь одним словом: ok', { maxTokens: 10, timeoutMs: 15000 });
         return out.trim();
     }
 
@@ -344,6 +402,17 @@
         localStorage.setItem(USAGE_KEY, JSON.stringify(arr));
         return true;
     }
+    // FIX: возврат слота квоты при неудачном запросе. Раньше takeSlot()
+    // вызывался ДО complete(), и если запрос падал (таймаут, 4xx, ошибка
+    // сети), слот «сгорал» — 20 неудачных попыток в час, и квота пустела,
+    // хотя ни одного ответа от модели так и не пришло.
+    function refundSlot() {
+        try {
+            const arr = recentCalls();
+            arr.pop(); // убираем последний добавленный timestamp
+            localStorage.setItem(USAGE_KEY, JSON.stringify(arr));
+        } catch { /* ignore */ }
+    }
 
     const urlsOf = (t) => (String(t).match(/https?:\/\/[^\s)]+/g) || []).sort().join('|');
     const fencesOf = (t) => (String(t).match(/```/g) || []).length;
@@ -389,16 +458,26 @@
         const prompt = 'Тип записи: ' + (type === 'task' ? 'задача' : 'заметка') +
             '\nЗаголовок: ' + (title || '(нет)') + '\nТекст:\n' + text;
 
-
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 30000);
+        // FIX: таймаут 60 с и управление слотом квоты теперь здесь, но
+        // AbortController переехал внутрь complete() (см. DEFAULT_TIMEOUT_MS).
+        // При любой ошибке (таймаут, HTTP, сеть) возвращаем слот и
+        // прокидываем понятную ошибку наверх — вызывающий код (applyAiPolish
+        // в app.js) её поймает и просто сохранит запись без правок.
         let raw;
         try {
             raw = await complete(prompt, {
-                system, signal: ctl.signal,
-                maxTokens: Math.min(3000, Math.ceil(body.length / 2) + 1200),
+                system,
+                timeoutMs: 60000,
+                // FIX: убрал Math.min(3000, …) — для бесплатных моделей
+                // генерация 3000 токенов гарантированно не укладывается в
+                // разумное время. 1500 хватает для «полировки» даже
+                // длинных заметок, и запрос стабильно успевает.
+                maxTokens: Math.min(1500, Math.ceil(body.length / 2) + 400),
             });
-        } finally { clearTimeout(timer); }
+        } catch (e) {
+            refundSlot();
+            throw e;
+        }
 
         console.log('[ai] polish raw:', raw);
 

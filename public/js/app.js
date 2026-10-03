@@ -332,7 +332,13 @@
       const all = await DB.allItems();
       // Служебная запись с настройками ИИ (см. ai.js) не должна попадать
       // в обычные списки/фильтры/метрики — убираем её здесь один раз.
-      state.items = all.filter((x) => x.id !== '__ai_settings__' && x.title !== '__ai_settings__' && x.id !== '__links__' && x.title !== '__links__');
+
+      const SERVICE_IDS = new Set([
+        '00000000-0000-0000-0000-0000000a1a1a', // AI settings
+        '00000000-0000-0000-0000-0000000b2b2b', // Links
+      ]);
+      state.items = all.filter((x) => !SERVICE_IDS.has(x.id));
+
       setSyncStatus('Сохранено', 'ok');
     } catch (e) {
       console.error('[load]', e);

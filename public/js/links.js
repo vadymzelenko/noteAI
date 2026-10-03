@@ -6,7 +6,7 @@
     'use strict';
 
     const KEY = 'nf.links';
-    const CLOUD_RECORD_ID = '__links__';
+    const CLOUD_RECORD_ID = '00000000-0000-0000-0000-0000000b2b2b';
 
     const state = {
         links: [],      // { id, url, domain, title, tags[], group, createdAt }
