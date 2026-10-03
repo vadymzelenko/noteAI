@@ -389,19 +389,30 @@
         const prompt = 'Тип записи: ' + (type === 'task' ? 'задача' : 'заметка') +
             '\nЗаголовок: ' + (title || '(нет)') + '\nТекст:\n' + text;
 
+
         const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 12000);
+        const timer = setTimeout(() => ctl.abort(), 30000);
         let raw;
         try {
             raw = await complete(prompt, {
-                system, signal: ctl.signal, temperature: 0.2,
-                maxTokens: Math.min(1600, Math.ceil(body.length / 2) + 220),
+                system, signal: ctl.signal,
+                maxTokens: Math.min(3000, Math.ceil(body.length / 2) + 1200),
             });
         } finally { clearTimeout(timer); }
 
+        console.log('[ai] polish raw:', raw);
+
         let data;
-        try { data = JSON.parse(raw.trim().replace(/^```json\s*|^```\s*|```\s*$/g, '')); }
-        catch { return null; }
+        try {
+            const cleaned = raw
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .replace(/```json|```/g, '');
+            const m = cleaned.match(/\{[\s\S]*\}/);
+            data = JSON.parse(m ? m[0] : cleaned);
+        } catch {
+            console.warn('[ai] polish: не JSON', raw);
+            return null;
+        }
 
         const out = {};
         if (wantGrammar) {
