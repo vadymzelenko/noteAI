@@ -1266,54 +1266,89 @@
     autosaveTimer = setTimeout(() => persistFromEditor(true), 1500);
   }
 
-  // Единственная точка, где вызывается ИИ. Возвращает функцию отмены или null.
-  async function applyAiPolish() {
-    const id = state.editingId, type = state.editingType;
+  // Фоновая ИИ-правка уже сохранённой записи. Работает по данным из
+// state.items, а не по DOM — редактор к этому моменту закрыт.
+// Правит запись на месте: обновляет state.items, сохраняет в БД,
+// перерисовывает список и показывает тост с возможностью отмены.
+  async function runAiPolishInBackground(itemId, { impTouched = false } = {}) {
+    const it0 = state.items.find((x) => x.id === itemId);
+    if (!it0) return;
+
+    // Снимок исходного состояния — для «Отменить» и для проверки, что
+    // запись не менялась, пока ИИ думал.
+    const startedAt = it0.updatedAt;
     const before = {
-      title: editor.titleEl.value.trim(),
-      body: editor.bodyEl.value,
-      category: editor.categoryEl.value.trim(),
-      tags: parseTags(editor.tagsEl.value),
-      importance: editor.importanceEl.value,
+      title: it0.title,
+      body: it0.body,
+      category: it0.category,
+      tags: [...(it0.tags || [])],
+      importance: it0.importance,
     };
-    if (!AI.shouldPolish(before)) return null;
 
     let res;
     try {
       const categories = [...new Set([...allCategories('task'), ...allCategories('note')])];
       res = await AI.polish({
-        type, title: before.title, body: before.body,
-        category: before.category, tags: before.tags,
-        needImportance: !editor.impTouched, categories,
+        type: it0.type,
+        title: before.title,
+        body: before.body,
+        category: before.category,
+        tags: before.tags,
+        needImportance: it0.type === 'task' && !impTouched,
+        categories,
       });
     } catch (e) {
-      console.warn('[ai] polish', e); // ИИ не ответил — сохраняем как есть, без ошибок пользователю
-      return null;
+      // Таймаут/HTTP/сеть — молчим, запись уже сохранена как есть.
+      console.warn('[ai] background polish', e);
+      return;
     }
-    if (!res) return null;
+    if (!res) return;
 
-    if (res.title !== undefined) editor.titleEl.value = res.title;
-    if (res.body !== undefined) editor.bodyEl.value = res.body;
-    if (res.category !== undefined) editor.categoryEl.value = res.category;
-    if (res.tags) editor.tagsEl.value = res.tags.join(', ');
-    if (res.importance) setImportance(res.importance);
+    // За время запроса могли: удалить запись, отредактировать её ещё раз,
+    // отправить в корзину, превратить в черновик. В этих случаях правку
+    // не применяем — молча выходим, чтобы не затереть чужие изменения.
+    const cur = state.items.find((x) => x.id === itemId);
+    if (!cur || cur.deleted || cur.draft) return;
+    if (cur.updatedAt !== startedAt) return;
 
-    return async () => {
-      const it = state.items.find((x) => x.id === id);
-      if (!it) return;
-      it.title = before.title; it.body = before.body;
-      it.category = before.category; it.tags = before.tags;
-      if (it.type === 'task') it.importance = before.importance;
-      await persist(it);
-      render();
-      toast('Вернул как было', 'info');
-    };
+    // Редактор мог быть снова открыт на этой же записи — тоже не трогаем,
+    // чтобы не сбить пользователя посреди ввода.
+    if (state.editingId === itemId && editor.overlay.classList.contains('open')) return;
+
+    if (res.title !== undefined) cur.title = res.title;
+    if (res.body !== undefined) cur.body = res.body;
+    if (res.category !== undefined) cur.category = res.category;
+    if (res.tags) cur.tags = res.tags;
+    if (res.importance) cur.importance = res.importance;
+
+    try {
+      await persist(cur);
+    } catch (e) {
+      console.error('[ai] background persist', e);
+      return;
+    }
+    render();
+
+    toast('ИИ поправил запись', 'ok', 6000, {
+      label: 'Отменить',
+      onClick: async () => {
+        const c = state.items.find((x) => x.id === itemId);
+        if (!c) return;
+        c.title = before.title;
+        c.body = before.body;
+        c.category = before.category;
+        c.tags = before.tags;
+        if (c.type === 'task') c.importance = before.importance;
+        await persist(c);
+        render();
+        toast('Вернул как было', 'info');
+      },
+    });
   }
 
   async function saveEditor() {
     clearTimeout(autosaveTimer);
     const saveBtn = document.getElementById('editorSave');
-    // Блокируем синхронно, до первого await — второй тап игнорируется.
     if (saveBtn && saveBtn.disabled) return;
     if (saveBtn) saveBtn.disabled = true;
     const label = saveBtn ? saveBtn.textContent : '';
@@ -1322,19 +1357,22 @@
       const body = editor.bodyEl.value;
       if (!title && !body) { closeEditor(); return; }
 
-      let undo = null;
-      if (editor.isNew && aiReady() && AI.shouldPolish({ title, body })) {
-        if (saveBtn) saveBtn.textContent = 'ИИ правит…';
-        editor.modal.classList.add('busy'); // на время запроса поля заблокированы, чтобы не затереть правки
-        try { undo = await applyAiPolish(); }
-        finally { editor.modal.classList.remove('busy'); }
-      }
+      // Решаем ДО закрытия редактора: editor.isNew и editor.impTouched
+      // сбрасываются в closeEditor(), а state.editingId становится null.
+      const runAi = editor.isNew && aiReady() && AI.shouldPolish({ title, body });
+      const impTouched = editor.impTouched;
+      const itemId = state.editingId;
 
+      // Сохраняем как есть и сразу закрываем окно — не ждём ИИ.
+      // Текст уже в state.items и на сервере, пользователь свободен.
       await persistFromEditor(false);
       closeEditor();
       render();
-      if (undo) toast('ИИ поправил запись', 'ok', 6000, { label: 'Отменить', onClick: undo });
-      else toast('Сохранено', 'ok');
+      toast('Сохранено', 'ok');
+
+      // ИИ правит в фоне — когда ответит, обновит запись и покажет
+      // отдельный тост с «Отменить». Ошибки/таймауты тихо проглатываются.
+      if (runAi && itemId) runAiPolishInBackground(itemId, { impTouched });
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = label; }
     }
