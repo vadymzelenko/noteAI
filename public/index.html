@@ -36,24 +36,20 @@
     </div>
 
     <div class="topbar-actions">
-<!--      <span class="sync-status" id="syncStatus" role="status" aria-live="polite"></span>-->
+      <!--      <span class="sync-status" id="syncStatus" role="status" aria-live="polite"></span>-->
       <button class="btn ghost sm" id="searchBtn" title="Поиск ( / )" aria-label="Поиск">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-<!--        <span>Поиск</span>-->
+        <!--        <span>Поиск</span>-->
       </button>
       <button class="btn ghost sm" id="themeBtn" title="Сменить тему" aria-label="Сменить тему">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-<!--        <span id="themeLabel">Noir</span>-->
+        <!--        <span id="themeLabel">Noir</span>-->
       </button>
 
-      <button class="btn ghost sm" id="modeBtn" title="Сменить режим">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span id="modeLabel">Задачи</span>
-      </button>
 
       <button class="btn ghost sm" id="settingsBtn" title="Настройки">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.37.5.62.91.62H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-<!--        <span>Настройки</span>-->
+        <!--        <span>Настройки</span>-->
       </button>
 
       <button class="btn ghost sm auth-chip" id="accountBtn" title="Аккаунт">
@@ -63,6 +59,12 @@
       </button>
     </div>
   </header>
+
+  <nav class="mode-tabs" id="modeTabs" aria-label="Раздел">
+    <button type="button" data-mode="tasks" class="active">Задачи</button>
+    <button type="button" data-mode="notes">Заметки</button>
+    <button type="button" data-mode="links">Ссылки</button>
+  </nav>
 
   <main class="content-card" id="viewRoot"></main>
 </div>
@@ -81,106 +83,97 @@
   </div>
 </div>
 
-<!-- ================= Редактор ================= -->
+<!-- ================= Запись: просмотр и правка ================= -->
 <div class="modal-overlay" id="editorOverlay" aria-hidden="true" role="dialog" aria-modal="true">
-  <div class="modal">
+  <div class="modal editor-modal" id="editorModal" data-mode="edit">
     <header class="modal-head">
-      <div class="segmented" id="editorTypeSwitch">
+      <div class="segmented edit-only" id="editorTypeSwitch">
         <button data-type="task" class="active">Задача</button>
         <button data-type="note">Заметка</button>
       </div>
+      <span class="type-badge view-only" id="editorTypeBadge">Задача</span>
       <div class="modal-head-actions">
-        <button class="icon-btn" id="editorDelete" title="В корзину">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        <button class="icon-btn" id="editorDelete" title="В корзину" aria-label="В корзину">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
-        <button class="icon-btn" id="editorClose" title="Закрыть">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button class="icon-btn" id="editorClose" title="Закрыть" aria-label="Закрыть">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
     </header>
 
     <div class="modal-body">
-      <input class="field-title" id="editorTitle" type="text" placeholder="Заголовок">
+      <!-- Развёрнутый просмотр (по тапу на запись) -->
+      <article class="editor-view view-only" id="editorView"></article>
 
-      <div class="form-grid">
-        <label class="field">
-          <span class="field-label">Категория</span>
-          <input id="editorCategory" type="text" placeholder="напр. Работа" list="categoryList">
-          <datalist id="categoryList"></datalist>
-        </label>
+      <!-- Правка / создание -->
+      <div class="editor-form edit-only">
+        <input class="field-title" id="editorTitle" type="text" placeholder="Заголовок" autocomplete="off">
 
-        <label class="field">
-          <span class="field-label">Теги</span>
-          <input id="editorTags" type="text" placeholder="дизайн, срочно">
-        </label>
-
-        <label class="field" data-task-only>
+        <label class="field deadline-field" data-task-only>
           <span class="field-label">Дедлайн</span>
           <input id="editorDeadline" type="datetime-local">
         </label>
 
-        <label class="field" data-task-only>
-          <span class="field-label">Важность</span>
-          <select id="editorImportance">
-            <option value="green">Зелёная — не срочно</option>
-            <option value="yellow">Жёлтая — средне</option>
-            <option value="red">Красная — важно</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field-label">Шрифт текста</span>
-          <select id="editorFont">
-            <option value="sans">Sans — Geist</option>
-            <option value="mono">Mono — Geist Mono</option>
-          </select>
-        </label>
-
-      </div>
-
-      <div class="toolbar">
-        <button type="button" class="tool" data-md="**" title="Жирный" aria-label="Жирный"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
-        <button type="button" class="tool" data-md="*" title="Курсив" aria-label="Курсив"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
-        <button type="button" class="tool" data-md="code" title="Код" aria-label="Код"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
-        <button type="button" class="tool" data-md="table" title="Таблица" aria-label="Таблица"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
-        <button type="button" class="tool" data-md="chart" title="График" aria-label="График"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="7" width="3" height="10" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/></svg></button>
-        <button type="button" class="tool" data-md="image" title="Изображение" aria-label="Изображение"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
-        <button type="button" class="tool ai-tool" id="aiPanelToggle" title="ИИ-помощник">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
-        </button>
-      </div>
-
-      <div class="ai-panel" id="aiPanel">
-        <div class="ai-panel-inner">
-          <div class="ai-panel-head">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/></svg>
-            ИИ-помощник
-          </div>
-          <div class="ai-quick-actions">
-            <button type="button" class="ai-quick-btn" data-ai-action="rewrite">Перефразировать</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="grammar">Исправить грамматику</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="expand">Дополнить</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="shorten">Сократить</button>
-            <button type="button" class="ai-quick-btn" data-ai-action="title">Придумать заголовок</button>
-          </div>
-          <div class="ai-prompt-row">
-            <input type="text" id="aiPromptInput" placeholder="Свой запрос: «сделай тон дружелюбнее», «добавь пункт про дедлайн»…">
-            <button type="button" class="btn primary sm" id="aiPromptSend">Отправить</button>
-          </div>
-          <div class="ai-status-line" id="aiPanelStatus"></div>
+        <div class="toolbar">
+          <button type="button" class="tool" data-md="**" title="Жирный" aria-label="Жирный"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+          <button type="button" class="tool" data-md="*" title="Курсив" aria-label="Курсив"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+          <button type="button" class="tool" data-md="code" title="Код" aria-label="Код"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+          <button type="button" class="tool" data-md="table" title="Таблица" aria-label="Таблица"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
+          <button type="button" class="tool" data-md="chart" title="График" aria-label="График"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="7" width="3" height="10" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/></svg></button>
+          <button type="button" class="tool" data-md="image" title="Изображение" aria-label="Изображение"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
         </div>
-      </div>
 
-      <div class="md-canvas">
-        <textarea id="editorBody" placeholder="Пиши markdown… ![изображение](https://…) — картинка, **жирный**, | a | b | таблица, ```chart [1,2,3]``` график"></textarea>
-        <div class="md-canvas-preview md" id="editorPreview"></div>
+        <textarea id="editorBody" rows="6" placeholder="Просто пиши. Markdown работает: **жирный**, - список, ```код```"></textarea>
+        <div class="md-canvas-preview md" id="editorPreview" hidden></div>
+
+        <p class="ai-hint" id="aiHint" hidden>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/></svg>
+          <span id="aiHintText"></span>
+        </p>
+
+        <details class="params" id="editorParams">
+          <summary><span>Параметры</span><small id="paramsSummary"></small></summary>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">Категория</span>
+              <input id="editorCategory" type="text" placeholder="напр. Работа" list="categoryList" autocomplete="off">
+              <datalist id="categoryList"></datalist>
+            </label>
+            <label class="field">
+              <span class="field-label">Теги</span>
+              <input id="editorTags" type="text" placeholder="дизайн, срочно" autocomplete="off">
+            </label>
+
+            <div class="field span-2" data-task-only>
+              <span class="field-label">Важность</span>
+              <div class="seg-row" id="importanceSeg" role="radiogroup" aria-label="Важность">
+                <button type="button" class="seg-opt" data-imp="green" role="radio"><span class="dot" style="background:var(--ok)"></span>Не срочно</button>
+                <button type="button" class="seg-opt" data-imp="yellow" role="radio"><span class="dot" style="background:var(--warn)"></span>Средне</button>
+                <button type="button" class="seg-opt" data-imp="red" role="radio"><span class="dot" style="background:var(--err)"></span>Важно</button>
+              </div>
+              <input type="hidden" id="editorImportance" value="green">
+            </div>
+
+            <div class="field span-2">
+              <span class="field-label">Шрифт текста</span>
+              <div class="seg-row" id="fontSeg" role="radiogroup" aria-label="Шрифт текста">
+                <button type="button" class="seg-opt" data-font="sans" role="radio">Sans</button>
+                <button type="button" class="seg-opt seg-mono" data-font="mono" role="radio">Mono</button>
+              </div>
+              <input type="hidden" id="editorFont" value="sans">
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
     <footer class="modal-foot">
-      <span class="char-count" id="charCount" aria-hidden="true"></span>
-      <button class="btn ghost" id="editorCancel">Отмена</button>
-      <button class="btn primary" id="editorSave">Сохранить</button>
+      <span class="char-count edit-only" id="charCount" aria-hidden="true"></span>
+      <button class="btn ghost view-only" id="editorCloseFoot">Закрыть</button>
+      <button class="btn primary view-only" id="editorEdit">Изменить</button>
+      <button class="btn ghost edit-only" id="editorCancel">Отмена</button>
+      <button class="btn primary edit-only" id="editorSave">Сохранить</button>
     </footer>
   </div>
 </div>
@@ -214,56 +207,73 @@
 
       <div class="settings-tab" id="settingsTab-ai">
 
-      <p class="hint">Достаточно вставить <b>Base URL</b> и <b>модель</b> (например, OpenRouter). API-ключ нужен, если провайдер его требует. Запросы идут напрямую по OpenAI-совместимому API. Ниже можно сохранить настройки в аккаунт, чтобы не вводить их заново на другом устройстве.</p>
+        <div class="pref-group" id="aiPrefs">
+          <div class="pref-title">Помощь при создании записи</div>
+          <label class="pref">
+            <input type="checkbox" id="prefAuto">
+            <span><b>Править автоматически</b><small>Один запрос при первом сохранении. Открытые и уже сохранённые записи ИИ не трогает.</small></span>
+          </label>
+          <label class="pref" data-pref-sub>
+            <input type="checkbox" id="prefGrammar">
+            <span><b>Грамматика и орфография</b><small>Без перефразирования, код и ссылки не меняются.</small></span>
+          </label>
+          <label class="pref" data-pref-sub>
+            <input type="checkbox" id="prefMeta">
+            <span><b>Заполнять параметры</b><small>Категория, теги и важность — только пустые поля.</small></span>
+          </label>
+          <div class="pref-note" id="aiPrefsNote"></div>
+        </div>
 
-      <div class="form-grid">
-        <label class="field span-2">
-          <span class="field-label">Base URL</span>
-          <input id="aiBaseUrl" type="text" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
-        </label>
-        <label class="field">
-          <span class="field-label">Модель</span>
-          <input id="aiModel" type="text" placeholder="nvidia/nemotron-3-ultra-550b-a55b:free" autocomplete="off">
-        </label>
-        <label class="field">
-          <span class="field-label">API-ключ</span>
-          <input id="aiKey" type="password" placeholder="sk-or-v1-… (необязательно)" autocomplete="off">
-        </label>
-      </div>
+        <p class="hint">Достаточно вставить <b>Base URL</b> и <b>модель</b> (например, OpenRouter). API-ключ нужен, если провайдер его требует. Запросы идут напрямую по OpenAI-совместимому API. Ниже можно сохранить настройки в аккаунт, чтобы не вводить их заново на другом устройстве.</p>
 
-      <label class="field" id="aiRememberRow" style="flex-direction:row;align-items:center;gap:8px" hidden>
-        <input id="aiRemember" type="checkbox" style="width:auto">
-        <span class="field-label" style="margin:0">Запомнить настройки на аккаунте (base_url, модель и API-ключ) — будут доступны на других устройствах после входа</span>
-      </label>
+        <div class="form-grid">
+          <label class="field span-2">
+            <span class="field-label">Base URL</span>
+            <input id="aiBaseUrl" type="text" placeholder="https://openrouter.ai/api/v1" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">Модель</span>
+            <input id="aiModel" type="text" placeholder="nvidia/nemotron-3-ultra-550b-a55b:free" autocomplete="off">
+          </label>
+          <label class="field">
+            <span class="field-label">API-ключ</span>
+            <input id="aiKey" type="password" placeholder="sk-or-v1-… (необязательно)" autocomplete="off">
+          </label>
+        </div>
 
-      <div class="row-actions">
-        <button class="btn primary" id="aiSave">Сохранить</button>
-        <button class="btn" id="aiTest">Проверить</button>
-        <button class="btn ghost" id="aiForget">Забыть на аккаунте</button>
-      </div>
-      <div class="status" id="aiStatus">ИИ выключен</div>
+        <label class="field" id="aiRememberRow" style="flex-direction:row;align-items:center;gap:8px" hidden>
+          <input id="aiRemember" type="checkbox" style="width:auto">
+          <span class="field-label" style="margin:0">Запомнить настройки на аккаунте (base_url, модель и API-ключ) — будут доступны на других устройствах после входа</span>
+        </label>
+
+        <div class="row-actions">
+          <button class="btn primary" id="aiSave">Сохранить</button>
+          <button class="btn" id="aiTest">Проверить</button>
+          <button class="btn ghost" id="aiForget">Забыть на аккаунте</button>
+        </div>
+        <div class="status" id="aiStatus">ИИ выключен</div>
       </div>
 
       <div class="settings-tab" id="settingsTab-email" hidden>
-      <h3 style="margin:0 0 4px;font-size:14px">Email-напоминания</h3>
-      <p class="hint">Для задач с красной важностью пришлём письмо за час до дедлайна, пока вкладка открыта. Отправка идёт через Gmail сервера — сюда попадает только адрес получателя.</p>
+        <h3 style="margin:0 0 4px;font-size:14px">Email-напоминания</h3>
+        <p class="hint">Для задач с красной важностью пришлём письмо за час до дедлайна, пока вкладка открыта. Отправка идёт через Gmail сервера — сюда попадает только адрес получателя.</p>
 
-      <div class="form-grid">
-        <label class="field span-2">
-          <span class="field-label">Email для напоминаний</span>
-          <input id="emailRecipient" type="email" placeholder="you@gmail.com">
-        </label>
-        <label class="field span-2" style="flex-direction:row;align-items:center;gap:8px">
-          <input id="emailEnabled" type="checkbox" style="width:auto">
-          <span class="field-label" style="margin:0">Включить email-напоминания</span>
-        </label>
-      </div>
+        <div class="form-grid">
+          <label class="field span-2">
+            <span class="field-label">Email для напоминаний</span>
+            <input id="emailRecipient" type="email" placeholder="you@gmail.com">
+          </label>
+          <label class="field span-2" style="flex-direction:row;align-items:center;gap:8px">
+            <input id="emailEnabled" type="checkbox" style="width:auto">
+            <span class="field-label" style="margin:0">Включить email-напоминания</span>
+          </label>
+        </div>
 
-      <div class="row-actions">
-        <button class="btn primary" id="emailSave">Сохранить</button>
-        <button class="btn" id="emailTest">Отправить тест</button>
-      </div>
-      <div class="status" id="emailStatus"></div>
+        <div class="row-actions">
+          <button class="btn primary" id="emailSave">Сохранить</button>
+          <button class="btn" id="emailTest">Отправить тест</button>
+        </div>
+        <div class="status" id="emailStatus"></div>
       </div>
     </div>
   </div>

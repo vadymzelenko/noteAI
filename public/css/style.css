@@ -146,8 +146,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 18px;
-  line-height: 1.6;              /* было 1.5 — чуть просторнее для читаемости */
+  font-size: 16px;
+  line-height: 1.6;
   font-feature-settings: 'ss01', 'cv11', 'cv02';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -160,7 +160,9 @@ body {
   transition: background .25s var(--ease), color .2s var(--ease);
   overscroll-behavior: none;
   overflow-x: hidden;
+  max-width: 100%;
 }
+[hidden] { display: none !important; }
 
 button { font-family: inherit; color: inherit; cursor: pointer; letter-spacing: inherit; }
 input, textarea, select { font-family: inherit; color: inherit; font-size: inherit; letter-spacing: inherit; }
@@ -547,7 +549,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 }
 .modal-head-actions { display: flex; align-items: center; gap: 6px; }
 .modal-title { font-size: 17.5px; font-weight: 600; margin: 0; letter-spacing: var(--track-tight); }
-.modal-body { padding: 24px; overflow-y: auto; flex: 1; }
+.modal-body { padding: 24px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; scrollbar-width: thin; }
 .modal-foot {
   padding: 15px 18px;
   border-top: 1px solid var(--border);
@@ -604,8 +606,7 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 .field.span-2 { grid-column: span 2; }
 .field-refs { grid-column: span 2; }
 .field-label {
-  font-family: var(--font-mono);
-  font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+  font-size: 13px; font-weight: 500;
   color: var(--muted);
 }
 .field input,
@@ -660,15 +661,6 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
 }
 .tool:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .tool .mono { font-family: var(--font-mono); font-size: 12px; }
-.tool.ai-tool {
-  width: auto; padding: 0 12px; gap: 6px;
-  color: var(--accent); border-color: var(--border-strong);
-}
-.ai-tool-label {
-  font-size: 13px; font-weight: 600;
-  font-family: var(--font-sans);
-  display: none;
-}
 
 .modal-body textarea {
   width: 100%; min-height: 190px; resize: vertical;
@@ -1040,23 +1032,8 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   .modal-foot .btn { flex: 1; justify-content: center; padding: 12px 14px; }
   .field-title { font-size: 20px; }
 
-  /* Тулбар редактора: на узком экране кнопки разметки не должны
-     теснить друг друга — делаем их компактнее и переносим разделитель
-     с кнопкой ИИ на отдельную полноширинную строку под ними. */
   .toolbar { gap: 6px; }
   .toolbar-sep { display: none; }
-  .tool.ai-tool {
-    width: 100%; height: 40px;
-    flex-basis: 100%;
-    justify-content: center;
-    margin-top: 2px;
-  }
-  .ai-tool-label { display: inline; }
-
-  .ai-quick-actions { gap: 8px; }
-  .ai-quick-btn { padding: 9px 12px; font-size: 13.5px; }
-  .ai-prompt-row { flex-direction: column; align-items: stretch; }
-  .ai-prompt-row #aiPromptSend { justify-content: center; padding: 12px; }
 
   .row-actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
 
@@ -1068,8 +1045,6 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   .item-row.clickable { min-height: 44px; }
   .chip { min-height: 36px; padding: 7px 12px; }
 
-  .quick-add-bar { flex-direction: column; align-items: stretch; padding: 10px 12px; }
-  .quick-add-bar .btn { width: 100%; justify-content: center; padding: 12px; }
 
   /* Попап эмодзи не должен упираться в край экрана на узких телефонах. */
   .popover { max-width: calc(100vw - 24px); }
@@ -1085,101 +1060,6 @@ button, .btn, .icon-btn, .chip, .item-row.clickable, a, .checkbox, .ref-chip, .t
   .view-actions .btn { flex-basis: 100%; }
   .metrics-grid { grid-template-columns: 1fr 1fr; }
 }
-
-/* ============================================================
-   ИИ-помощник в редакторе
-   ============================================================ */
-.ai-panel {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  margin-bottom: 14px;
-  overflow: hidden;
-  max-height: 0;
-  opacity: 0;
-  transition: max-height .25s var(--ease), opacity .2s var(--ease), margin-bottom .25s var(--ease);
-}
-.ai-panel.open { max-height: 420px; opacity: 1; }
-.ai-panel-inner { padding: 14px; }
-.ai-panel-head {
-  display: flex; align-items: center; gap: 8px;
-  font-family: var(--font-mono);
-  font-size: 12px; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-.ai-panel-head svg { color: var(--accent); flex-shrink: 0; }
-
-.ai-quick-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-.ai-quick-btn {
-  padding: 7px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px; font-weight: 500;
-  transition: border-color .12s var(--ease), background .12s var(--ease), opacity .12s var(--ease);
-}
-.ai-quick-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
-.ai-quick-btn:disabled { opacity: .5; cursor: default; }
-
-.ai-prompt-row { display: flex; gap: 8px; }
-.ai-prompt-row input {
-  flex: 1;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 16px;
-  outline: none;
-  transition: border-color .12s var(--ease);
-}
-.ai-prompt-row input:focus { border-color: var(--border-strong); }
-.ai-prompt-row input::placeholder { color: var(--muted); }
-
-.ai-status-line {
-  margin-top: 8px;
-  font-size: 12.5px;
-  color: var(--muted);
-  display: flex; align-items: center; gap: 6px;
-  min-height: 18px;
-}
-.ai-status-line.busy { color: var(--text); }
-.ai-status-line.err { color: var(--err); }
-.ai-status-line.ok { color: var(--ok); }
-
-.ai-spinner {
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--text);
-  animation: ai-spin .7s linear infinite;
-  flex-shrink: 0;
-}
-@keyframes ai-spin { to { transform: rotate(360deg); } }
-
-/* ============================================================
-   ИИ быстрое добавление на главном экране
-   ============================================================ */
-.quick-add-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-  margin-bottom: 20px;
-  transition: border-color .12s var(--ease);
-}
-.quick-add-bar:focus-within { border-color: var(--border-strong); }
-.quick-add-bar svg { color: var(--accent); flex-shrink: 0; }
-.quick-add-bar input {
-  flex: 1; min-width: 0;
-  border: none; outline: none; background: transparent;
-  font-size: 16px; color: var(--text);
-}
-.quick-add-bar input::placeholder { color: var(--muted); }
-.quick-add-bar .btn { flex-shrink: 0; }
 
 /* Auth chip */
 .auth-chip { gap: 8px; }
@@ -1637,46 +1517,6 @@ html.no-scroll, body.no-scroll { overflow: hidden; }
 }
 
 /* ============================================================
-   Единое окно текста (писать + предпросмотр)
-   ============================================================ */
-.md-canvas {
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
-  overflow: hidden;
-  transition: border-color .12s var(--ease);
-}
-.md-canvas:focus-within { border-color: var(--border-strong); }
-.md-canvas textarea {
-  display: block;
-  width: 100%;
-  min-height: 150px;
-  resize: vertical;
-  padding: 13px;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 16px;
-  line-height: 1.6;
-  letter-spacing: 0;
-  outline: none;
-}
-.md-canvas textarea::placeholder { color: var(--muted); }
-.md-canvas-preview {
-  padding: 14px 15px;
-  min-height: 48px;
-  background: var(--surface);
-}
-.md-canvas-preview:empty::before {
-  content: 'Здесь сразу появляется отрисованный текст';
-  color: var(--muted);
-  font-size: 13.5px;
-}
-
-/* ============================================================
    Изображения в markdown
    ============================================================ */
 .md .md-img {
@@ -1831,13 +1671,6 @@ html.no-scroll, body.no-scroll { overflow: hidden; }
   font-size: 15px; font-weight: 600;
   padding: 3px 6px; border-radius: var(--r-xs);
   outline: none;
-
-/* ============================================================
-   Настройки: вкладки
-   ============================================================ */
-.settings-tabs { margin-bottom: 18px; width: 100%; }
-.settings-tab[hidden] { display: none !important; }
-
 }
 .link-title-input:hover, .link-title-input:focus {
   border-color: var(--border); background: var(--surface);
@@ -1869,3 +1702,238 @@ html.no-scroll, body.no-scroll { overflow: hidden; }
   .link-group-select { max-width: none; flex: 1; }
 }
 
+
+
+/* ============================================================
+   Настройки: вкладки
+   ============================================================ */
+.settings-tabs { margin-bottom: 18px; width: 100%; }
+.settings-tabs button { flex: 1; }
+
+/* ============================================================
+   Разделы (Задачи / Заметки / Ссылки)
+   ============================================================ */
+.mode-tabs {
+  width: 100%; max-width: 1200px;
+  display: flex; gap: 4px; padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.mode-tabs button {
+  flex: 1; min-height: 42px;
+  border: none; background: transparent;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-size: 15px; font-weight: 500;
+  transition: background .12s var(--ease), color .12s var(--ease);
+}
+.mode-tabs button:hover { color: var(--text); }
+.mode-tabs button.active { background: var(--surface-3); color: var(--text); }
+
+/* ============================================================
+   Защита от горизонтального скролла
+   ============================================================ */
+html { max-width: 100%; overflow-x: hidden; }
+.app > * { min-width: 0; }
+.content-card { min-width: 0; }
+.item-row, .item-body { min-width: 0; }
+.item-title, .item-desc, .view-heading { overflow-wrap: anywhere; }
+.md img, .md .md-img { max-width: 100%; height: auto; }
+.md table { display: block; max-width: 100%; overflow-x: auto; }
+.md pre { max-width: 100%; }
+.topbar-actions { flex-wrap: nowrap; }
+
+/* ============================================================
+   Запись: просмотр и правка в одном окне
+   ============================================================ */
+.editor-modal { max-width: 720px; }
+.editor-modal[data-mode='view'] .edit-only,
+.editor-modal[data-mode='edit'] .view-only { display: none !important; }
+.editor-modal.busy .modal-body { opacity: .55; pointer-events: none; transition: opacity .15s var(--ease); }
+
+.type-badge {
+  font-size: 13px; font-weight: 500; color: var(--muted);
+  padding: 5px 11px;
+  border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: var(--surface-2);
+}
+
+/* --- правка --- */
+.editor-form { display: flex; flex-direction: column; min-width: 0; }
+.editor-form .field-title { margin-bottom: 18px; }
+.deadline-field { max-width: 300px; margin-bottom: 18px; }
+.modal-body input[type='datetime-local'] {
+  min-width: 0; max-width: 100%;
+  -webkit-appearance: none; appearance: none;
+  min-height: 46px;
+}
+.editor-form .toolbar { margin: 0 0 8px; }
+
+.editor-form textarea {
+  display: block; width: 100%;
+  min-height: 160px;
+  resize: none; overflow: hidden;      /* высоту ведёт autoGrow — вложенного скролла нет */
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-family: var(--font-sans);
+  font-size: 16px; line-height: 1.65; letter-spacing: 0;
+}
+.editor-form textarea.font-mono { font-family: var(--font-mono); font-size: 15px; }
+
+.ai-hint {
+  display: flex; align-items: center; gap: 8px;
+  margin: 12px 2px 0;
+  font-size: 13px; color: var(--muted);
+}
+.ai-hint svg { color: var(--accent); flex-shrink: 0; }
+
+.params {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.params > summary {
+  list-style: none;
+  display: flex; align-items: center; gap: 12px;
+  min-height: 46px; padding: 0 14px;
+  font-size: 14.5px; font-weight: 500;
+  cursor: pointer; user-select: none;
+}
+.params > summary::-webkit-details-marker { display: none; }
+.params > summary small {
+  margin-left: auto; min-width: 0;
+  font-size: 13px; font-weight: 400; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.params > summary::after {
+  content: ''; flex-shrink: 0;
+  width: 7px; height: 7px; margin: -3px 2px 0 0;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform .15s var(--ease);
+}
+.params[open] > summary::after { transform: rotate(-135deg); margin-top: 3px; }
+.params .form-grid { padding: 4px 14px 16px; margin: 0; gap: 14px; }
+
+.seg-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg-opt {
+  flex: 1 1 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 14px; font-weight: 500; white-space: nowrap;
+  transition: color .12s var(--ease), border-color .12s var(--ease), background .12s var(--ease);
+}
+.seg-opt:hover { color: var(--text); border-color: var(--border-strong); }
+.seg-opt.active { color: var(--text); border-color: var(--text); background: var(--accent-soft); }
+.seg-opt .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.seg-mono { font-family: var(--font-mono); }
+
+/* --- развёрнутый просмотр --- */
+.editor-view { min-width: 0; }
+.view-heading {
+  margin: 0 0 12px;
+  font-size: 24px; line-height: 1.25; font-weight: 600;
+  letter-spacing: var(--track-tighter);
+}
+.view-heading.done { text-decoration: line-through; color: var(--muted); }
+.view-deadline {
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 12px;
+  font-size: 14px; color: var(--muted);
+}
+.view-deadline svg { flex-shrink: 0; }
+.view-deadline.soon { color: var(--warn); }
+.view-deadline.overdue { color: var(--err); }
+.view-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+.view-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px;
+  border: 1px solid var(--border); border-radius: var(--r-pill);
+  background: var(--surface-2);
+  font-size: 13px; color: var(--text);
+}
+.view-chip.tag { color: var(--muted); }
+.view-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.view-chip.imp-red .dot { background: var(--err); }
+.view-chip.imp-yellow .dot { background: var(--warn); }
+.view-chip.imp-green .dot { background: var(--ok); }
+.view-body { font-size: 16px; line-height: 1.7; }
+.view-body.md h1 { font-size: 21px; }
+.view-body.md h2 { font-size: 18px; }
+.view-body.md h3 { font-size: 16px; }
+.view-body.md p, .view-body.md li { font-size: inherit; }
+.view-body.font-mono { font-size: 14.5px; }
+.view-empty { margin: 0; color: var(--muted); }
+.view-done { width: 100%; justify-content: center; min-height: 46px; margin-top: 24px; }
+.view-done.is-done { color: var(--muted); }
+.view-stamp { margin-top: 18px; font-size: 12.5px; color: var(--muted); }
+
+/* ============================================================
+   Тост с действием («Отменить»)
+   ============================================================ */
+.toast .toast-msg { flex: 1; min-width: 0; }
+.toast-action {
+  flex-shrink: 0;
+  min-height: 36px; padding: 0 10px; margin: -6px -8px -6px 0;
+  border: none; border-radius: var(--r-sm);
+  background: transparent; color: var(--accent);
+  font-size: 14px; font-weight: 600;
+}
+.toast-action:hover { background: var(--accent-soft); }
+
+/* ============================================================
+   Настройки ИИ: переключатели
+   ============================================================ */
+.pref-group {
+  margin-bottom: 18px; padding: 4px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.pref-title { padding: 10px 0 4px; font-size: 14px; font-weight: 600; }
+.pref { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; cursor: pointer; }
+.pref + .pref { border-top: 1px solid var(--border); }
+.pref[data-pref-sub] { padding-left: 30px; }
+.pref input { flex-shrink: 0; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.pref > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pref b { font-size: 14.5px; font-weight: 500; }
+.pref small { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.pref input:disabled + span { opacity: .5; }
+.pref-note { padding: 6px 0 12px; font-size: 12.5px; color: var(--muted); }
+
+/* ============================================================
+   Мобильная версия
+   ============================================================ */
+@media (max-width: 720px) {
+  body { font-size: 16px; }
+  .mode-tabs button { min-height: 44px; font-size: 15px; }
+
+  /* Окно записи подстраивается под экранную клавиатуру (см. bindViewport) */
+  .modal-overlay { inset: var(--vvt, 0px) 0 auto 0; height: var(--vvh, 100dvh); }
+  .modal { max-height: none; height: 100%; }
+
+  .editor-modal .modal-body { padding: 16px 16px 24px; }
+  .editor-form .field-title { margin-bottom: 14px; padding-bottom: 12px; }
+  .deadline-field { max-width: none; margin-bottom: 14px; }
+  .editor-form textarea { min-height: 180px; padding: 12px; }
+  .field input, .field select,
+  .modal-body input[type='text'], .modal-body input[type='email'], .modal-body input[type='password'] { min-height: 46px; }
+  .params .form-grid { padding: 2px 12px 14px; }
+  .seg-opt { padding: 8px 10px; }
+  .view-heading { font-size: 22px; }
+  .view-body { font-size: 16px; }
+
+  .toast-stack { width: calc(100vw - 20px); }
+  .pref[data-pref-sub] { padding-left: 24px; }
+}
+@media (max-width: 380px) {
+  .mode-tabs button { font-size: 14px; padding: 0 6px; }
+  .seg-opt { font-size: 13px; padding: 8px; gap: 6px; }
+}

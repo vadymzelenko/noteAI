@@ -146,8 +146,10 @@
                     { role: 'user',   content: prompt },
                 ],
                 max_tokens: opts.maxTokens || 512,
+                ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
                 ...(opts.stream ? { stream: true } : {}),
             }),
+            ...(opts.signal ? { signal: opts.signal } : {}),
         });
 
         if (!res.ok) {
@@ -304,6 +306,134 @@
         };
     }
 
+
+    /* --- Умная правка при СОЗДАНИИ записи ---
+       Один запрос на запись, только при первом сохранении, только если
+       включено в настройках. Исправляет орфографию/пунктуацию и заполняет
+       ПУСТЫЕ поля (категория, теги, важность) — то, что пользователь уже
+       указал сам, ИИ не трогает. Защита от лишних трат и порчи текста:
+       пропуск коротких/очень длинных текстов, лимит запросов в час,
+       таймаут, проверка, что ИИ не пересказал текст и не сломал код/ссылки. */
+
+    const PREFS_KEY = 'nf.ai.prefs';
+    const USAGE_KEY = 'nf.ai.usage';
+    const MAX_CALLS_PER_HOUR = 20;
+    const MIN_LETTERS = 12;
+    const MAX_BODY = 5000;
+    const prefs = { auto: true, grammar: true, meta: true };
+
+    function loadPrefs() {
+        try { Object.assign(prefs, JSON.parse(localStorage.getItem(PREFS_KEY) || '{}')); } catch { /* ignore */ }
+    }
+    function setPrefs(p) {
+        Object.assign(prefs, p);
+        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+        return { ...prefs };
+    }
+    function recentCalls() {
+        const now = Date.now();
+        let arr;
+        try { arr = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]'); } catch { arr = []; }
+        return arr.filter((t) => now - t < 3600000);
+    }
+    const callsLeft = () => MAX_CALLS_PER_HOUR - recentCalls().length;
+    function takeSlot() {
+        const arr = recentCalls();
+        if (arr.length >= MAX_CALLS_PER_HOUR) return false;
+        arr.push(Date.now());
+        localStorage.setItem(USAGE_KEY, JSON.stringify(arr));
+        return true;
+    }
+
+    const urlsOf = (t) => (String(t).match(/https?:\/\/[^\s)]+/g) || []).sort().join('|');
+    const fencesOf = (t) => (String(t).match(/```/g) || []).length;
+
+    // Быстрая проверка без сети: стоит ли вообще трогать эту запись.
+    function shouldPolish({ title = '', body = '' }) {
+        if (!config.enabled || !prefs.auto || !(prefs.grammar || prefs.meta)) return false;
+        const letters = ((title + body).match(/\p{L}/gu) || []).length;
+        return letters >= MIN_LETTERS && body.length <= MAX_BODY && callsLeft() > 0;
+    }
+
+    async function polish({ type, title, body, category, tags, needImportance, categories = [] }) {
+        if (!shouldPolish({ title, body })) return null;
+
+        const wantGrammar = prefs.grammar;
+        const wantCategory = prefs.meta && !category;
+        const wantTags = prefs.meta && !(tags && tags.length);
+        const wantImportance = prefs.meta && type === 'task' && !!needImportance;
+        if (!wantGrammar && !wantCategory && !wantTags && !wantImportance) return null;
+        if (!takeSlot()) return null;
+
+        const fields = [];
+        if (wantGrammar) fields.push('"title":"исправленный заголовок","body":"исправленный текст"');
+        if (wantCategory) fields.push('"category":"категория: 1–2 слова"');
+        if (wantTags) fields.push('"tags":["до 4 коротких тегов в нижнем регистре"]');
+        if (wantImportance) fields.push('"importance":"red|yellow|green"');
+
+        const rules = [];
+        if (wantGrammar) rules.push(
+            'Исправляй ТОЛЬКО орфографию, пунктуацию и грамматику. Не перефразируй, не сокращай, не дополняй, не меняй тон. ' +
+            'Markdown-разметку, блоки кода, ссылки, числа, имена и эмодзи оставляй как есть. Если ошибок нет — верни текст без изменений.');
+        if (wantCategory && categories.length) rules.push(
+            'Для категории по возможности выбери одну из уже существующих: ' + categories.slice(0, 12).join(', ') + '. Новую придумывай, только если ничего не подходит.');
+        if (wantImportance) rules.push(
+            'importance: red — срочно или горят сроки, yellow — обычное дело, green — можно не спешить.');
+
+        const system = 'Ты аккуратный редактор в приложении задач и заметок. ' +
+            'Отвечай СТРОГО одним валидным JSON-объектом без пояснений и без ```. ' +
+            'Формат: {' + fields.join(',') + '}. ' + rules.join(' ');
+
+        // Если грамматика не нужна, для категории/тегов хватает начала текста.
+        const text = wantGrammar ? body : body.slice(0, 1500);
+        const prompt = 'Тип записи: ' + (type === 'task' ? 'задача' : 'заметка') +
+            '\nЗаголовок: ' + (title || '(нет)') + '\nТекст:\n' + text;
+
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 12000);
+        let raw;
+        try {
+            raw = await complete(prompt, {
+                system, signal: ctl.signal, temperature: 0.2,
+                maxTokens: Math.min(1600, Math.ceil(body.length / 2) + 220),
+            });
+        } finally { clearTimeout(timer); }
+
+        let data;
+        try { data = JSON.parse(raw.trim().replace(/^```json\s*|^```\s*|```\s*$/g, '')); }
+        catch { return null; }
+
+        const out = {};
+        if (wantGrammar) {
+            if (typeof data.body === 'string' && data.body.trim() && data.body !== body) {
+                const ratio = data.body.length / Math.max(1, body.length);
+                const sane = (body.length < 40 || (ratio > 0.75 && ratio < 1.3))
+                    && fencesOf(data.body) === fencesOf(body)
+                    && urlsOf(data.body) === urlsOf(body);
+                if (sane) out.body = data.body.trim();
+            }
+            if (typeof data.title === 'string' && title && data.title.trim() && data.title !== title) {
+                const t = data.title.trim();
+                if (t.length <= title.length * 1.3 + 5 && t.length >= title.length * 0.7 - 5) out.title = t;
+            }
+        }
+        if (wantCategory && typeof data.category === 'string') {
+            const c = data.category.trim().replace(/^["'«#]|["'»]$/g, '');
+            if (c && c.length <= 30) out.category = c;
+        }
+        if (wantTags && Array.isArray(data.tags)) {
+            const t = [...new Set(data.tags
+                .map((x) => String(x).trim().replace(/^#/, '').toLowerCase())
+                .filter((x) => x && x.length <= 24))].slice(0, 4);
+            if (t.length) out.tags = t;
+        }
+        if (wantImportance && ['red', 'yellow', 'green'].includes(data.importance)) out.importance = data.importance;
+
+        return Object.keys(out).length ? out : null;
+    }
+
+    loadPrefs();
+
     load();
 
     window.AI = {
@@ -312,6 +442,7 @@
         save, load, complete,
         suggestTags, summarize, parseTask, suggestDeadline, test,
         editText, createFromText,
+        get prefs() { return { ...prefs }; }, setPrefs, shouldPolish, polish, callsLeft,
         loadFromCloud, saveToCloud, clearCloud,
     };
 })();

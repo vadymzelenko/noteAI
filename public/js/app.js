@@ -268,17 +268,27 @@
   }
 
   /* --- Тост-уведомления (ненавязчивая обратная связь) --- */
-  function toast(msg, kind = 'info', ms = 2600) {
+  function toast(msg, kind = 'info', ms = 2600, action) {
     const stack = document.getElementById('toastStack');
     if (!stack) return;
     const el = document.createElement('div');
     el.className = 'toast ' + kind;
-    el.innerHTML = `<span class="dot"></span><span>${escapeHtml(msg)}</span>`;
-    stack.appendChild(el);
-    setTimeout(() => {
+    el.innerHTML = `<span class="dot"></span><span class="toast-msg">${escapeHtml(msg)}</span>`;
+    const dismiss = () => {
+      if (!el.isConnected || el.classList.contains('leaving')) return;
       el.classList.add('leaving');
       setTimeout(() => el.remove(), 200);
-    }, ms);
+    };
+    if (action) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'toast-action';
+      b.textContent = action.label;
+      b.addEventListener('click', () => { dismiss(); action.onClick(); });
+      el.appendChild(b);
+    }
+    stack.appendChild(el);
+    setTimeout(dismiss, ms);
   }
 
   /* --- Action sheet (iOS) для подтверждения действий --- */
@@ -443,8 +453,18 @@
     applyTheme(THEMES[(idx + 1) % THEMES.length]);
   }
   function updateModeButton() {
-    const el = document.getElementById('modeLabel');
-    if (el) el.textContent = state.mode === 'tasks' ? 'Задачи' : state.mode === 'notes' ? 'Заметки' : 'Ссылки';
+    document.querySelectorAll('#modeTabs button').forEach((b) => {
+      const on = b.dataset.mode === state.mode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+  }
+  function setMode(mode) {
+    if (state.mode === mode) return;
+    state.mode = mode;
+    localStorage.setItem('nf.mode', state.mode);
+    updateModeButton();
+    render();
   }
   function toggleMode() {
     state.mode = state.mode === 'tasks' ? 'notes' : state.mode === 'notes' ? 'links' : 'tasks';
@@ -470,15 +490,8 @@
     return [...set].sort();
   }
 
-  function renderQuickAddBar() {
-    return `
-      <div class="quick-add-bar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
-        <input type="text" id="quickAddInput" placeholder="Скажи ИИ, что добавить — «купить молоко завтра», «заметка про идею для проекта»…">
-        <button class="btn primary sm" id="quickAddBtn">Добавить</button>
-      </div>
-    `;
-  }
+  // Поле «ИИ-добавление» живёт только в меню «Создать» — на главном экране оно дублировало его.
+  const renderQuickAddBar = () => '';
 
   function renderFiltersPanel() {
     const cats = allCategories(state.mode === 'tasks' ? 'task' : 'note');
@@ -507,6 +520,12 @@
     `;
   }
 
+  function tagChips(list) {
+    const arr = list || [];
+    const shown = arr.slice(0, 3).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
+    return shown + (arr.length > 3 ? `<span class="mini-tag muted">+${arr.length - 3}</span>` : '');
+  }
+
   function renderTaskRow(it) {
     // Для выполненных задач относительный таймер («просрочено 14д», «через 2ч»)
     // не считаем — задача уже закрыта, дедлайн неактуален. Показываем только
@@ -514,10 +533,10 @@
     const rem = it.done ? null : remaining(it.deadline);
     const cls = rem
         ? (rem.kind === 'overdue' ? 'timer overdue'
-          : rem.kind === 'soon'   ? 'timer soon'
-          : 'timer')
+            : rem.kind === 'soon'   ? 'timer soon'
+                : 'timer')
         : 'timer';
-    const tags = (it.tags||[]).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
+    const tags = tagChips(it.tags);
     const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
     const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 200))}</div>` : '';
     const deadlineSpan = it.deadline
@@ -544,10 +563,10 @@
         </div>
       </div>
     `;
-}
+  }
 
   function renderNoteRow(it) {
-    const tags = (it.tags||[]).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
+    const tags = tagChips(it.tags);
     const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
     const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 220))}</div>` : '';
     return `
@@ -945,53 +964,108 @@
     `;
   }
 
-  /* ====================== РЕДАКТОР (с autosave) ====================== */
+  /* ====================== ЗАПИСЬ: ПРОСМОТР И ПРАВКА ======================
+     Тап по записи открывает РАЗВЁРНУТЫЙ ПРОСМОТР (режим 'view'): весь текст,
+     параметры, дедлайн. Оттуда можно отметить выполненной, удалить или нажать
+     «Изменить» — тогда та же карточка переходит в режим правки ('edit').
+     ИИ вызывается только при первом сохранении НОВОЙ записи (см. applyAiPolish)
+     и никогда — при просмотре или правке уже сохранённой записи. */
 
   const editor = {
-    overlay:null, titleEl:null, categoryEl:null, tagsEl:null,
-    deadlineEl:null, importanceEl:null, fontEl:null,
-    bodyEl:null, previewEl:null,
+    overlay: null, modal: null, viewEl: null,
+    titleEl: null, categoryEl: null, tagsEl: null,
+    deadlineEl: null, importanceEl: null, fontEl: null,
+    bodyEl: null, previewEl: null,
+    mode: 'edit',        // 'view' | 'edit'
+    isNew: false,        // запись ещё ни разу не сохранена кнопкой → ИИ разрешён
+    impTouched: false,   // важность выбрана пользователем → ИИ её не меняет
   };
   let autosaveTimer = null;
-  let aiBusy = false;
+
+  const IMP_LABEL = { green: 'Не срочно', yellow: 'Средне', red: 'Важно' };
+  const parseTags = (v) => String(v || '').split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const aiReady = () => !!(window.AI && AI.config.enabled && AI.prefs.auto && (AI.prefs.grammar || AI.prefs.meta));
+  const aiMetaOn = () => !!(window.AI && AI.config.enabled && AI.prefs.auto && AI.prefs.meta);
+
+  function setEditorMode(mode) {
+    editor.mode = mode;
+    editor.modal.dataset.mode = mode;
+    const body = editor.modal.querySelector('.modal-body');
+    if (body) body.scrollTop = 0;
+  }
+
+  function setImportance(v) {
+    editor.importanceEl.value = v;
+    document.querySelectorAll('#importanceSeg .seg-opt').forEach((b) => {
+      const on = b.dataset.imp === v;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+
+  function setFont(v) {
+    v = v === 'mono' ? 'mono' : 'sans';
+    editor.fontEl.value = v;
+    editor.bodyEl.classList.toggle('font-mono', v === 'mono');
+    document.querySelectorAll('#fontSeg .seg-opt').forEach((b) => {
+      const on = b.dataset.font === v;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
 
   function openEditor(item, type) {
-    // Раньше для новой записи editingId оставался null до самого "Сохранить".
-    // Из-за этого двойной клик/тап по кнопке (или клик, пока предыдущий
-    // persist() ещё летит по сети) создавал ДВЕ разные записи с разными id —
-    // это и есть баг «дублирующиеся заметки». Теперь id генерируется сразу
-    // при открытии редактора и остаётся неизменным до закрытия: и автосейв,
-    // и ручное сохранение всегда делают upsert по одному и тому же id,
-    // так что повторный вызов просто перезапишет ту же запись, а не создаст новую.
+    // id генерируется сразу при открытии и не меняется до закрытия — иначе
+    // двойной тап создавал бы дубликаты (см. историю бага «дублирующиеся заметки»).
     state.editingId = item ? item.id : uid();
     state.editingType = item ? item.type : type;
+    editor.isNew = !item || !!item.draft;
+    editor.impTouched = !!item && !item.draft;
+
+    const t = item || {
+      title: '', body: '', category: '', tags: [],
+      importance: 'green', deadline: null, font: 'sans', done: false,
+    };
+    editor.titleEl.value = t.title || '';
+    editor.categoryEl.value = t.category || '';
+    editor.tagsEl.value = (t.tags || []).join(', ');
+    editor.deadlineEl.value = toLocalInput(t.deadline);
+    editor.bodyEl.value = t.body || '';
+    setImportance(t.importance || 'green');
+    setFont(t.font);
+    renderCategoryDatalist();
+    setEditorType(state.editingType);
 
     editor.overlay.classList.add('open');
     editor.overlay.setAttribute('aria-hidden', 'false');
 
-    const t = item || {
-      title:'', body:'', category:'', tags:[],
-      importance:'green', deadline:null, font:'sans', done:false,
-    };
+    if (item && !item.draft) { renderView(item); setEditorMode('view'); }
+    else enterEditMode('title');
+  }
 
-    editor.titleEl.value = t.title || '';
-    editor.categoryEl.value = t.category || '';
-    editor.tagsEl.value = (t.tags||[]).join(', ');
-    editor.deadlineEl.value = toLocalInput(t.deadline);
-    editor.importanceEl.value = t.importance || 'green';
-    editor.fontEl.value = t.font === 'mono' ? 'mono' : 'sans';
-    editor.bodyEl.value = t.body || '';
-
-    renderCategoryDatalist();
-    setEditorType(state.editingType);
-    updatePreview();
-    toggleAiPanel(false);
-    document.getElementById('aiPromptInput').value = '';
-    setTimeout(() => editor.titleEl.focus(), 50);
+  function enterEditMode(focus) {
+    setEditorMode('edit');
+    // Новая запись + ИИ сам заполнит параметры → не загромождаем экран, сворачиваем.
+    document.getElementById('editorParams').open = !(editor.isNew && aiMetaOn());
+    updateParamsSummary();
+    updateAiHint();
+    updateCharCount();
+    requestAnimationFrame(() => {
+      autoGrow();
+      if (focus === 'title') (editor.titleEl.value ? editor.bodyEl : editor.titleEl).focus();
+      else if (focus === 'body') {
+        editor.bodyEl.focus();
+        const n = editor.bodyEl.value.length;
+        editor.bodyEl.setSelectionRange(n, n);
+      }
+    });
   }
 
   function closeEditor() {
     clearTimeout(autosaveTimer);
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     editor.overlay.classList.remove('open');
     editor.overlay.setAttribute('aria-hidden', 'true');
     state.editingId = null;
@@ -1000,7 +1074,8 @@
   function setEditorType(type) {
     state.editingType = type;
     document.querySelectorAll('#editorTypeSwitch button').forEach((b) => b.classList.toggle('active', b.dataset.type === type));
-    document.querySelectorAll('[data-task-only]').forEach((el) => { el.style.display = type === 'task' ? '' : 'none'; });
+    document.querySelectorAll('#editorModal [data-task-only]').forEach((el) => { el.style.display = type === 'task' ? '' : 'none'; });
+    updateParamsSummary();
   }
 
   function renderCategoryDatalist() {
@@ -1008,6 +1083,30 @@
     const cats = new Set();
     state.items.forEach((it) => { if (it.category && !hidden(it)) cats.add(it.category); });
     dl.innerHTML = [...cats].map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
+  }
+
+  function updateParamsSummary() {
+    const el = document.getElementById('paramsSummary');
+    if (!el) return;
+    const parts = [];
+    if (state.editingType === 'task') parts.push(IMP_LABEL[editor.importanceEl.value] || '');
+    const cat = editor.categoryEl.value.trim();
+    if (cat) parts.push(cat);
+    const n = parseTags(editor.tagsEl.value).length;
+    if (n) parts.push(`${n} ${n === 1 ? 'тег' : n < 5 ? 'тега' : 'тегов'}`);
+    el.textContent = parts.filter(Boolean).join(' · ');
+  }
+
+  function updateAiHint() {
+    const el = document.getElementById('aiHint');
+    if (!el) return;
+    const show = editor.isNew && aiReady();
+    el.hidden = !show;
+    if (!show) return;
+    const p = AI.prefs, parts = [];
+    if (p.grammar) parts.push('поправит ошибки');
+    if (p.meta) parts.push('заполнит пустые параметры');
+    document.getElementById('aiHintText').textContent = `При сохранении ИИ ${parts.join(' и ')}.`;
   }
 
   function updateCharCount() {
@@ -1018,19 +1117,27 @@
     el.textContent = `${words} сл. · ${text.length} симв.`;
   }
 
-  function updatePreview() {
-    const body = editor.bodyEl.value;
-    editor.previewEl.innerHTML = body.trim() ? renderBody(body) : '';
-    updateCharCount();
+  // Поле текста растёт вместе с содержимым: внутри окна остаётся ровно один
+  // скролл (у самой карточки), без вложенной прокрутки у textarea.
+  function autoGrow() {
+    const ta = editor.bodyEl;
+    if (!ta || editor.mode !== 'edit') return;
+    const sc = ta.closest('.modal-body');
+    const top = sc ? sc.scrollTop : 0;
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(ta.scrollHeight + 2, 160) + 'px';
+    if (sc) sc.scrollTop = top;
   }
+
+  function onBodyChanged() { updateCharCount(); autoGrow(); }
 
   function insertAtCursor(text) {
     const ta = editor.bodyEl;
-    const s = ta.selectionStart, e = ta.selectionEnd;
-    ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
-    ta.selectionStart = ta.selectionEnd = s + text.length;
+    const a = ta.selectionStart, b = ta.selectionEnd;
+    ta.value = ta.value.slice(0, a) + text + ta.value.slice(b);
+    ta.selectionStart = ta.selectionEnd = a + text.length;
     ta.focus();
-    updatePreview();
+    onBodyChanged();
     scheduleAutosave();
   }
 
@@ -1038,103 +1145,70 @@
   // если ничего не выделено), а выделение ставит на сам текст.
   function wrapSelection(before, after, placeholder) {
     const ta = editor.bodyEl;
-    const s = ta.selectionStart, e = ta.selectionEnd;
-    const inner = ta.value.slice(s, e) || placeholder;
-    const insert = before + inner + after;
-    ta.value = ta.value.slice(0, s) + insert + ta.value.slice(e);
-    ta.selectionStart = s + before.length;
-    ta.selectionEnd = s + before.length + inner.length;
+    const a = ta.selectionStart, b = ta.selectionEnd;
+    const inner = ta.value.slice(a, b) || placeholder;
+    ta.value = ta.value.slice(0, a) + before + inner + after + ta.value.slice(b);
+    ta.selectionStart = a + before.length;
+    ta.selectionEnd = a + before.length + inner.length;
     ta.focus();
-    updatePreview();
+    onBodyChanged();
     scheduleAutosave();
   }
 
-  /* ---------- ИИ-помощник в редакторе ---------- */
+  /* ---------- Развёрнутый просмотр ---------- */
 
-  function setAiPanelStatus(text, kind) {
-    const el = document.getElementById('aiPanelStatus');
-    if (!el) return;
-    el.innerHTML = kind === 'busy'
-        ? `<span class="ai-spinner"></span>${escapeHtml(text)}`
-        : escapeHtml(text);
-    el.className = 'ai-status-line' + (kind ? ' ' + kind : '');
-  }
+  function renderView(it) {
+    document.getElementById('editorTypeBadge').textContent = it.type === 'task' ? 'Задача' : 'Заметка';
+    const isTask = it.type === 'task';
+    const rem = isTask && !it.done ? remaining(it.deadline) : null;
 
-  function setAiBusy(busy) {
-    aiBusy = busy;
-    document.querySelectorAll('.ai-quick-btn, #aiPromptSend').forEach((b) => { b.disabled = busy; });
-  }
+    const chips = [];
+    if (isTask) chips.push(`<span class="view-chip imp-${it.importance || 'green'}"><span class="dot"></span>${IMP_LABEL[it.importance || 'green']}</span>`);
+    if (it.category) chips.push(`<span class="view-chip">${escapeHtml(it.category)}</span>`);
+    (it.tags || []).forEach((t) => chips.push(`<span class="view-chip tag">#${escapeHtml(t)}</span>`));
 
-  async function runAiAction(action, customPrompt) {
-    if (aiBusy) return;
-    if (!AI.config.enabled) {
-      setAiPanelStatus('ИИ не настроен — открой «Настройки» → ИИ', 'err');
-      return;
-    }
-    const title = editor.titleEl.value.trim();
-    const body = editor.bodyEl.value;
-    if (action !== 'title' && !body.trim()) {
-      setAiPanelStatus('Сначала напиши хоть немного текста', 'err');
-      return;
-    }
+    const deadline = isTask && it.deadline
+        ? `<div class="view-deadline ${rem ? rem.kind : ''}">${svgIcon('clock', 15)}<span>${escapeHtml(fmtTime(it.deadline))}${rem ? ' · ' + escapeHtml(rem.text) : ''}</span></div>`
+        : '';
+    // Если текст начинается с «# Заголовок», повторяющего название записи — не показываем дубль.
+    let text = it.body || '';
+    const h1 = text.match(/^\s*#\s+(.+?)\s*(?:\n|$)/);
+    if (h1 && h1[1].trim().toLowerCase() === (it.title || '').trim().toLowerCase()) text = text.slice(h1[0].length);
+    const body = text.trim()
+        ? `<div class="md view-body ${it.font === 'mono' ? 'font-mono' : ''}">${renderBody(text)}</div>`
+        : '<p class="view-empty">Текста нет. Нажми «Изменить», чтобы добавить.</p>';
+    const doneBtn = isTask
+        ? `<button type="button" class="btn view-done ${it.done ? 'is-done' : ''}" id="viewDoneBtn">${it.done ? 'Вернуть в работу' : 'Отметить выполненной'}</button>`
+        : '';
 
-    setAiBusy(true);
-    setAiPanelStatus(action === 'title' ? 'Придумываю заголовок…' : 'Работаю над текстом…', 'busy');
-    try {
-      const result = await AI.editText({ action, customPrompt, title, body });
-      if (result.title !== undefined) {
-        editor.titleEl.value = result.title;
-      }
-      if (result.body !== undefined) {
-        editor.bodyEl.value = result.body;
-        updatePreview();
-      }
-      scheduleAutosave();
-      setAiPanelStatus('Готово', 'ok');
-    } catch (e) {
-      console.error('[ai]', e);
-      setAiPanelStatus(e.message || 'Ошибка ИИ', 'err');
-    } finally {
-      setAiBusy(false);
-    }
-  }
+    editor.viewEl.innerHTML = `
+      <h2 class="view-heading ${it.done ? 'done' : ''}">${escapeHtml(it.title || '(без названия)')}</h2>
+      ${deadline}
+      ${chips.length ? `<div class="view-meta">${chips.join('')}</div>` : ''}
+      ${body}
+      ${doneBtn}
+      <div class="view-stamp">Изменено ${escapeHtml(fmtTime(it.updatedAt))}</div>
+    `;
 
-  function toggleAiPanel(forceOpen) {
-    const panel = document.getElementById('aiPanel');
-    const open = forceOpen !== undefined ? forceOpen : !panel.classList.contains('open');
-    panel.classList.toggle('open', open);
-    if (open) {
-      setAiPanelStatus('', '');
-      setTimeout(() => document.getElementById('aiPromptInput')?.focus(), 200);
-    }
-  }
-
-  function bindAiPanel() {
-    document.getElementById('aiPanelToggle').addEventListener('click', () => toggleAiPanel());
-
-    document.querySelectorAll('.ai-quick-btn').forEach((btn) => {
-      btn.addEventListener('click', () => runAiAction(btn.dataset.aiAction));
-    });
-
-    const promptInput = document.getElementById('aiPromptInput');
-    const send = () => {
-      const text = promptInput.value.trim();
-      if (!text) return;
-      runAiAction('custom', text);
-      promptInput.value = '';
-    };
-    document.getElementById('aiPromptSend').addEventListener('click', send);
-    promptInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); send(); }
+    const btn = editor.viewEl.querySelector('#viewDoneBtn');
+    if (btn) btn.addEventListener('click', () => {
+      const cur = state.items.find((x) => x.id === state.editingId);
+      if (!cur) return;
+      cur.done = !cur.done;
+      renderView(cur);
+      render();
+      persist(cur).catch((err) => console.error('[toggle]', err));
     });
   }
+
+  /* ---------- Сохранение ---------- */
 
   function readEditorInto(item) {
     item.type = state.editingType;
     item.title = editor.titleEl.value.trim();
     item.body = editor.bodyEl.value;
     item.category = editor.categoryEl.value.trim();
-    item.tags = editor.tagsEl.value.split(',').map((s) => s.trim()).filter(Boolean);
+    item.tags = parseTags(editor.tagsEl.value);
     item.font = editor.fontEl.value === 'mono' ? 'mono' : 'sans';
     if (item.type === 'task') {
       item.deadline = fromLocalInput(editor.deadlineEl.value);
@@ -1147,15 +1221,16 @@
     return item;
   }
 
-  // saveLock защищает от «гонки состояний»: пока идёт upsert в БД, повторный
-  // вызов (автосейв сработал одновременно с ручным «Сохранить», либо два
-  // быстрых клика/тапа) просто выходит, ничего не создавая — id записи один
-  // и тот же (см. openEditor), поэтому даже параллельные upsert-ы по одному
-  // id не могут породить дубликат, а лок нужен только чтобы не долбить сеть.
+  // saveLock не даёт двум сохранениям идти параллельно. Автосейв при занятом
+  // замке просто пропускается, а явное «Сохранить» ЖДЁТ его завершения —
+  // раньше оно молча выходило, и запись так и оставалась черновиком.
   let saveLock = false;
 
   async function persistFromEditor(isAutosave) {
-    if (saveLock) return;
+    if (saveLock) {
+      if (isAutosave) return;
+      for (let i = 0; i < 100 && saveLock; i++) await sleep(50);
+    }
     const title = editor.titleEl.value.trim();
     const body = editor.bodyEl.value;
     if (!title && !body) return; // пустой черновик не сохраняем
@@ -1168,15 +1243,11 @@
         createdAt: Date.now(), deleted: false, draft: true,
       };
       readEditorInto(item);
-      // Автосейв (пока пользователь печатает и ещё не нажал «Сохранить»)
-      // помечает запись как черновик — она не попадает в обычные списки/
-      // фильтры/аналитику (см. hidden()) и видна только в модалке
-      // «Черновики». Явное «Сохранить» ниже (isAutosave=false) всегда
-      // снимает флаг draft и делает запись обычной — это единственное
-      // место, где черновик становится настоящей задачей/заметкой.
+      // Автосейв помечает новую запись как черновик (скрыта из списков и
+      // аналитики). Явное «Сохранить» снимает флаг — единственное место,
+      // где черновик становится настоящей задачей/заметкой.
       item.draft = isAutosave ? (item.draft !== false) : false;
       await persist(item);
-      // Ссылки собираем только с реально сохранённых записей (не с черновиков).
       if (!isAutosave && window.Links) Links.ingestFromItem(item);
     } finally {
       saveLock = false;
@@ -1184,28 +1255,82 @@
   }
 
   function scheduleAutosave() {
+    if (editor.mode !== 'edit') return;
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => persistFromEditor(true), 1500);
+  }
+
+  // Единственная точка, где вызывается ИИ. Возвращает функцию отмены или null.
+  async function applyAiPolish() {
+    const id = state.editingId, type = state.editingType;
+    const before = {
+      title: editor.titleEl.value.trim(),
+      body: editor.bodyEl.value,
+      category: editor.categoryEl.value.trim(),
+      tags: parseTags(editor.tagsEl.value),
+      importance: editor.importanceEl.value,
+    };
+    if (!AI.shouldPolish(before)) return null;
+
+    let res;
+    try {
+      const categories = [...new Set([...allCategories('task'), ...allCategories('note')])];
+      res = await AI.polish({
+        type, title: before.title, body: before.body,
+        category: before.category, tags: before.tags,
+        needImportance: !editor.impTouched, categories,
+      });
+    } catch (e) {
+      console.warn('[ai] polish', e); // ИИ не ответил — сохраняем как есть, без ошибок пользователю
+      return null;
+    }
+    if (!res) return null;
+
+    if (res.title !== undefined) editor.titleEl.value = res.title;
+    if (res.body !== undefined) editor.bodyEl.value = res.body;
+    if (res.category !== undefined) editor.categoryEl.value = res.category;
+    if (res.tags) editor.tagsEl.value = res.tags.join(', ');
+    if (res.importance) setImportance(res.importance);
+
+    return async () => {
+      const it = state.items.find((x) => x.id === id);
+      if (!it) return;
+      it.title = before.title; it.body = before.body;
+      it.category = before.category; it.tags = before.tags;
+      if (it.type === 'task') it.importance = before.importance;
+      await persist(it);
+      render();
+      toast('Вернул как было', 'info');
+    };
   }
 
   async function saveEditor() {
     clearTimeout(autosaveTimer);
     const saveBtn = document.getElementById('editorSave');
-    // Кнопка блокируется немедленно и синхронно — до первого await — чтобы
-    // второй клик/тап, случившийся, пока сеть ещё не ответила, был просто
-    // проигнорирован, а не запустил параллельное сохранение.
+    // Блокируем синхронно, до первого await — второй тап игнорируется.
     if (saveBtn && saveBtn.disabled) return;
     if (saveBtn) saveBtn.disabled = true;
+    const label = saveBtn ? saveBtn.textContent : '';
     try {
       const title = editor.titleEl.value.trim();
       const body = editor.bodyEl.value;
       if (!title && !body) { closeEditor(); return; }
+
+      let undo = null;
+      if (editor.isNew && aiReady() && AI.shouldPolish({ title, body })) {
+        if (saveBtn) saveBtn.textContent = 'ИИ правит…';
+        editor.modal.classList.add('busy'); // на время запроса поля заблокированы, чтобы не затереть правки
+        try { undo = await applyAiPolish(); }
+        finally { editor.modal.classList.remove('busy'); }
+      }
+
       await persistFromEditor(false);
       closeEditor();
       render();
-      toast('Сохранено', 'ok');
+      if (undo) toast('ИИ поправил запись', 'ok', 6000, { label: 'Отменить', onClick: undo });
+      else toast('Сохранено', 'ok');
     } finally {
-      if (saveBtn) saveBtn.disabled = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = label; }
     }
   }
 
@@ -1224,6 +1349,8 @@
 
   function bindEditor() {
     editor.overlay = document.getElementById('editorOverlay');
+    editor.modal = document.getElementById('editorModal');
+    editor.viewEl = document.getElementById('editorView');
     editor.titleEl = document.getElementById('editorTitle');
     editor.categoryEl = document.getElementById('editorCategory');
     editor.tagsEl = document.getElementById('editorTags');
@@ -1236,21 +1363,46 @@
     document.querySelectorAll('#editorTypeSwitch button').forEach((b) => {
       b.addEventListener('click', () => { setEditorType(b.dataset.type); scheduleAutosave(); });
     });
+
     document.getElementById('editorSave').addEventListener('click', saveEditor);
     document.getElementById('editorCancel').addEventListener('click', closeEditor);
+    document.getElementById('editorCloseFoot').addEventListener('click', closeEditor);
     document.getElementById('editorDelete').addEventListener('click', deleteFromEditor);
-    bindAiPanel();
-
-    editor.bodyEl.addEventListener('input', () => { updatePreview(); scheduleAutosave(); });
-    ['input','change'].forEach((ev) => {
-      [editor.titleEl, editor.categoryEl, editor.tagsEl, editor.deadlineEl, editor.importanceEl, editor.fontEl]
-          .forEach((el) => el.addEventListener(ev, scheduleAutosave));
+    document.getElementById('editorEdit').addEventListener('click', () => {
+      editor.isNew = false; // правка уже сохранённой записи — без ИИ
+      enterEditMode('body');
+    });
+    // Закрытие только крестиком/кнопками (клик по фону ничего не делает).
+    // В режиме правки крестик сохраняет, в просмотре — просто закрывает.
+    document.getElementById('editorClose').addEventListener('click', () => {
+      if (editor.mode === 'edit') saveEditor(); else closeEditor();
     });
 
-    // По требованию UX: окно записи закрывается ТОЛЬКО по кнопке "Закрыть" (крестик)
-    // или по "Сохранить" — клик по фону больше ничего не делает, чтобы случайный
-    // клик мимо поля не закрывал редактор и не терял фокус на мобильном.
-    document.getElementById('editorClose').addEventListener('click', saveEditor);
+    // Выбор важности и шрифта — крупные сегменты вместо выпадающих списков.
+    document.querySelectorAll('#importanceSeg .seg-opt').forEach((b) => {
+      b.addEventListener('click', () => {
+        editor.impTouched = true;
+        setImportance(b.dataset.imp);
+        editor.importanceEl.dispatchEvent(new Event('input'));
+      });
+    });
+    document.querySelectorAll('#fontSeg .seg-opt').forEach((b) => {
+      b.addEventListener('click', () => {
+        setFont(b.dataset.font);
+        editor.fontEl.dispatchEvent(new Event('input'));
+        autoGrow();
+      });
+    });
+
+    editor.bodyEl.addEventListener('input', () => { onBodyChanged(); scheduleAutosave(); });
+    [editor.titleEl, editor.categoryEl, editor.tagsEl, editor.deadlineEl, editor.importanceEl, editor.fontEl].forEach((el) => {
+      ['input', 'change'].forEach((ev) => el.addEventListener(ev, () => {
+        updateParamsSummary();
+        if (el === editor.titleEl) updateCharCount();
+        scheduleAutosave();
+      }));
+    });
+    window.addEventListener('resize', () => { if (editor.overlay.classList.contains('open')) autoGrow(); });
 
     document.querySelectorAll('.toolbar .tool').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1679,6 +1831,7 @@
         baseUrl: document.getElementById('aiBaseUrl').value.trim(),
         model: document.getElementById('aiModel').value.trim(),
       });
+      refreshAiPrefsForm();
       const remember = document.getElementById('aiRemember');
       if (remember && remember.checked) {
         if (!Auth.isSignedIn()) {
@@ -1723,7 +1876,35 @@
     document.getElementById('navTrash').addEventListener('click', () => { closeSettingsModal(); openTrash(); });
     document.getElementById('navLinks').addEventListener('click', () => { closeSettingsModal(); openLinks(); });
 
+    bindAiPrefs();
     bindEmailSettings();
+  }
+
+  function refreshAiPrefsForm() {
+    const auto = document.getElementById('prefAuto');
+    if (!auto || !window.AI) return;
+    const p = AI.prefs, ready = AI.config.enabled;
+    auto.checked = p.auto;
+    document.getElementById('prefGrammar').checked = p.grammar;
+    document.getElementById('prefMeta').checked = p.meta;
+    auto.disabled = !ready;
+    document.querySelectorAll('[data-pref-sub] input').forEach((i) => { i.disabled = !ready || !p.auto; });
+    document.getElementById('aiPrefsNote').textContent = ready
+        ? `Осталось запросов в этот час: ${AI.callsLeft()} из 20.`
+        : 'Сначала подключи ИИ ниже: нужны Base URL и модель.';
+  }
+
+  function bindAiPrefs() {
+    const ids = ['prefAuto', 'prefGrammar', 'prefMeta'];
+    if (!window.AI || !ids.every((id) => document.getElementById(id))) return;
+    ids.forEach((id) => document.getElementById(id).addEventListener('change', () => {
+      AI.setPrefs({
+        auto: document.getElementById('prefAuto').checked,
+        grammar: document.getElementById('prefGrammar').checked,
+        meta: document.getElementById('prefMeta').checked,
+      });
+      refreshAiPrefsForm();
+    }));
   }
 
   function refreshEmailSettingsForm() {
@@ -1917,6 +2098,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     overlay.setAttribute('aria-hidden', 'false');
     switchSettingsTab('ai');
     refreshAiSettingsForm();
+    refreshAiPrefsForm();
     const rememberEl = document.getElementById('aiRemember');
     const rememberRow = document.getElementById('aiRememberRow');
     if (rememberEl) rememberEl.checked = false;
@@ -2045,12 +2227,12 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     if (cmds.length) {
       parts.push('<div class="palette-section">Команды</div>');
       cmds.forEach((c) => parts.push(
-        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
+          `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
     }
     if (items.length) {
       parts.push('<div class="palette-section">Записи</div>');
       items.forEach((c) => parts.push(
-        `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
+          `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
     }
     if (!parts.length) parts.push('<div class="palette-empty">Ничего не найдено</div>');
     return parts.join('');
@@ -2300,6 +2482,24 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     update();
   }
 
+  /* ====================== ЭКРАННАЯ КЛАВИАТУРА ====================== */
+
+  // На iOS клавиатура не меняет высоту окна (dvh её не учитывает) — окно
+  // записи уезжало под клавиатуру, а кнопка «Сохранить» пропадала. Следим
+  // за visualViewport и отдаём CSS реальную видимую высоту и смещение.
+  function bindViewport() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement.style;
+    const set = () => {
+      root.setProperty('--vvh', vv.height + 'px');
+      root.setProperty('--vvt', vv.offsetTop + 'px');
+    };
+    vv.addEventListener('resize', set);
+    vv.addEventListener('scroll', set);
+    set();
+  }
+
   /* ====================== СЕТЬ (онлайн/офлайн) ====================== */
 
   function bindNetwork() {
@@ -2326,7 +2526,7 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
         openEditor(null, state.mode === 'tasks' ? 'task' : 'note');
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        if (editor.overlay.classList.contains('open')) { e.preventDefault(); saveEditor(); }
+        if (editor.overlay.classList.contains('open') && editor.mode === 'edit') { e.preventDefault(); saveEditor(); }
       }
       if (e.key === '/' && !(e.ctrlKey || e.metaKey)) {
         const tag = document.activeElement && document.activeElement.tagName;
@@ -2383,10 +2583,11 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     bindNetwork();
     bindSearch();
     bindScrollLock();
+    bindViewport();
     bindAddSheet();
 
     document.getElementById('themeBtn').addEventListener('click', cycleTheme);
-    document.getElementById('modeBtn').addEventListener('click', toggleMode);
+    document.querySelectorAll('#modeTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     document.getElementById('fabAdd').addEventListener('click', openAddSheet);
 
     render();
