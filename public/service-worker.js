@@ -1,21 +1,19 @@
 // NodeFlow service worker — офлайн-кэш оболочки.
 
-const CACHE_VERSION = 'nodeflow-v16';
+const CACHE_VERSION = 'nodeflow-v17';
 const SHELL_FILES = [
     '/',
     '/index.html',
     '/manifest.json',
     '/css/style.css',
+    '/js/theme-boot.js',
     '/js/auth.js',
-    '/js/ai.js',
-    '/js/email.js',
     '/js/db.js',
     '/js/links.js',
     '/js/app.js',
     '/icons/icon.svg',
     '/icons/maskable.svg',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js',
     'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css',
     'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js',
     'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js',

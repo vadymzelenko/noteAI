@@ -1,101 +1,170 @@
-// NodeFlow — основная логика. Бэкенд — Supabase.
+// NodeFlow — основная логика интерфейса. Бэкенд — Supabase (см. db.js).
 (function () {
   'use strict';
 
-  const THEMES = ['noir', 'snow', 'graphite', 'azure', 'violet', 'sage'];
-  const THEME_LABELS = { noir:'Noir', snow:'Snow', graphite:'Graphite', azure:'Azure', violet:'Violet', sage:'Sage' };
-  const TRASH_TTL = 14 * 24 * 60 * 60 * 1000;
+  /* ====================== КОНСТАНТЫ ====================== */
 
-  // Служебные записи в таблице items — настройки ИИ и хранилище ссылок.
-  // Хранятся там же, что обычные записи (без миграции БД), с фиксированными
-  // uuid'ами; вырезаем их из state.items сразу после загрузки, чтобы они не
-  // попадали в списки/поиск/метрики.
+  const TRASH_TTL = 14 * 24 * 60 * 60 * 1000;
+  const DONE_VISIBLE = 5;          // сколько последних выполненных задач показывать
+  const AUTOSAVE_DELAY = 700;      // мс тишины после ввода до автосохранения
+  const RETRY_DELAY = 5000;
+
+  // Служебные записи в таблице items (старые настройки ИИ и коллекция ссылок) —
+  // не показываем их в списках.
   const SERVICE_IDS = new Set([
-    '00000000-0000-0000-0000-0000000a1a1a', // AI settings (см. ai.js)
-    '00000000-0000-0000-0000-0000000b2b2b', // Links       (см. links.js)
+    '00000000-0000-0000-0000-0000000a1a1a',
+    '00000000-0000-0000-0000-0000000b2b2b',
   ]);
 
-  // SVG-иконки (Feather-стиль) — используются вместо эмодзи в UI.
+  const ACCENTS = [
+    { id: 'mono',   label: 'Моно' },
+    { id: 'blue',   label: 'Синий' },
+    { id: 'violet', label: 'Фиолетовый' },
+    { id: 'green',  label: 'Зелёный' },
+    { id: 'orange', label: 'Оранжевый' },
+    { id: 'pink',   label: 'Розовый' },
+  ];
+
   const ICONS = {
     task: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
     note: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-    search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-    swap: '<path d="M7 16V4M7 4L3 8M7 4l4 4"/><path d="M17 8v12M17 20l4-4M17 20l-4-4"/>',
     metrics: '<path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-7"/>',
-    drafts: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
-    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
-    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.37.5.62.91.62H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>',
+    settings: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
     account: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-    ai: '<path d="M12 3l1.9 4.9L19 9.8l-5.1 1.9L12 16.6l-1.9-4.9L5 9.8l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
-    add: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
-    total: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-    bolt: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
-    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
-    target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    search: '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+    check: '<polyline points="20 6 9 17 4 12"/>',
+    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    more: '<circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/><circle cx="5" cy="12" r="1.2"/>',
+    external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
     close: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+    folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    ban: '<circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/>',
+    // Тулбар редактора
+    heading: '<path d="M6 4v16"/><path d="M18 4v16"/><path d="M6 12h12"/>',
+    bold: '<path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/>',
+    italic: '<line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/>',
+    strike: '<path d="M16 6.5C15.2 5 13.7 4 12 4c-2.5 0-4.5 1.6-4.5 3.8 0 1.1.5 2 1.4 2.7"/><path d="M8 17.5C8.8 19 10.3 20 12 20c2.5 0 4.5-1.6 4.5-3.8 0-.8-.2-1.5-.7-2.2"/><line x1="4" y1="12" x2="20" y2="12"/>',
+    ul: '<line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+    ol: '<line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 4h1v5"/><path d="M4 9h2"/><path d="M6 20H4c0-1.2 2-2 2-3.2 0-.6-.5-.8-1-.8s-1 .3-1 .8"/>',
+    checklist: '<rect x="3" y="4" width="6" height="6" rx="1.5"/><path d="M3.5 17l2 2 3.5-3.5"/><line x1="13" y1="7" x2="21" y2="7"/><line x1="13" y1="17" x2="21" y2="17"/>',
+    quote: '<line x1="4" y1="5" x2="4" y2="19"/><line x1="9" y1="8" x2="20" y2="8"/><line x1="9" y1="12" x2="18" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/>',
+    code: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+    table: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>',
+    chart: '<path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="6" width="3" height="11" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+    mono: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>',
+    eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   };
 
-  function svgIcon(name, size = 16) {
-    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+  function svgIcon(name, size = 16, sw = 1.8) {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
   }
 
   const state = {
     mode: 'tasks',
-    theme: 'noir',
+    themePref: 'dark',
+    accent: 'mono',
     items: [],
-    filter: { importance: 'all', category: 'all', type: 'all', query: '' },
-    filtersOpen: false,
+    loaded: false,
+    authReady: false,
+    animateNext: true,
+    search: { type: 'all' },
+    links: { group: '', query: '' },
     editingId: null,
     editingType: 'task',
   };
 
   /* ====================== УТИЛИТЫ ====================== */
 
+  const $ = (id) => document.getElementById(id);
+
   const uid = () => (crypto.randomUUID
-      ? crypto.randomUUID()
-      : 'i_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8));
+    ? crypto.randomUUID()
+    : 'i_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8));
 
   const escapeHtml = (s) => String(s ?? '')
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
   const pad2 = (n) => String(n).padStart(2, '0');
+  const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
   function fmtTime(ts) {
     if (!ts) return '';
     const d = new Date(ts);
-    return `${pad2(d.getDate())}.${pad2(d.getMonth()+1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   }
+
+  // «сегодня, 14:00», «завтра, 09:30», «15 ноя, 22:27», «15 ноя 2027»
+  function fmtHuman(ts, withTime = true) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const day0 = startOfDay(ts);
+    const today0 = startOfDay();
+    const time = withTime ? `, ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : '';
+    const diffDays = Math.round((day0 - today0) / 86400000);
+    if (diffDays === 0) return 'сегодня' + time;
+    if (diffDays === 1) return 'завтра' + time;
+    if (diffDays === -1) return 'вчера' + time;
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return `${d.getDate()} ${MONTHS[d.getMonth()]}${sameYear ? '' : ' ' + d.getFullYear()}${time}`;
+  }
+
   function toLocalInput(ts) {
     if (!ts) return '';
     const d = new Date(ts);
-    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   }
-  const fromLocalInput = (v) => v ? (new Date(v).getTime() || null) : null;
+  const fromLocalInput = (v) => (v ? (new Date(v).getTime() || null) : null);
 
   function remaining(deadline) {
     if (!deadline) return null;
     const diff = deadline - Date.now();
-    const abs = Math.abs(diff);
-    const m = Math.floor(abs / 60000);
+    const m = Math.floor(Math.abs(diff) / 60000);
     const h = Math.floor(m / 60);
     const d = Math.floor(h / 24);
-    let s;
-    if (d > 0) s = `${d}д ${h % 24}ч`;
-    else if (h > 0) s = `${h}ч ${m % 60}м`;
-    else s = `${m}м`;
-    return { diff, text: diff < 0 ? `просрочено ${s}` : `через ${s}`, kind: diff < 0 ? 'overdue' : (diff < 24*3600*1000 ? 'soon' : 'ok') };
+    const s = d > 0 ? `${d} д ${h % 24} ч` : h > 0 ? `${h} ч ${m % 60} мин` : `${m} мин`;
+    return {
+      diff,
+      text: diff < 0 ? `просрочено на ${s}` : `через ${s}`,
+      kind: diff < 0 ? 'overdue' : diff < 24 * 3600 * 1000 ? 'soon' : 'ok',
+    };
   }
 
-  const startOfDay = (ts) => { const d = new Date(ts || Date.now()); d.setHours(0,0,0,0); return d.getTime(); };
+  const startOfDay = (ts) => { const d = new Date(ts || Date.now()); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const normImp = (v) => (v === 'red' ? 'red' : 'green');
+  const plural = (n, one, few, many) => {
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return many;
+    if (b > 1 && b < 5) return few;
+    if (b === 1) return one;
+    return many;
+  };
+
+  // Короткий текстовый анонс записи для списков (без markdown-разметки).
+  function plainPreview(text, max = 220) {
+    return String(text || '')
+      .replace(/```[\s\S]*?```/g, ' [код] ')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' [изображение] ')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/^\s{0,3}(#{1,3}|>)\s+/gm, '')
+      .replace(/^\s*[-*]\s+\[[ xX]\]\s+/gm, '')
+      .replace(/\*\*|~~|`/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, max);
+  }
 
   /* ====================== MARKDOWN ====================== */
 
   function highlightCode(code, lang) {
     const cls = 'language-' + (lang || 'plain');
     if (window.Prism && lang && Prism.languages[lang]) {
-      try { return `<pre class="${cls}"><code class="${cls}">${Prism.highlight(code, Prism.languages[lang], lang)}</code></pre>`; } catch {}
+      try { return `<pre class="${cls}"><code class="${cls}">${Prism.highlight(code, Prism.languages[lang], lang)}</code></pre>`; } catch { /* fallthrough */ }
     }
     return `<pre class="${cls}"><code>${escapeHtml(code)}</code></pre>`;
   }
@@ -109,40 +178,40 @@
       const h = (v / max) * (H - 20);
       const x = i * barW + 4;
       const y = H - 10 - h;
-      bars += `<rect class="bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW-8).toFixed(1)}" height="${h.toFixed(1)}" rx="2"/>`;
-      bars += `<text class="label" x="${(x+(barW-8)/2).toFixed(1)}" y="${H-1}" text-anchor="middle">${v}</text>`;
+      bars += `<rect class="bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW - 8).toFixed(1)}" height="${h.toFixed(1)}" rx="3"/>`;
+      bars += `<text class="label" x="${(x + (barW - 8) / 2).toFixed(1)}" y="${H - 1}" text-anchor="middle">${v}</text>`;
     });
-    return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line class="axis" x1="0" y1="${H-10}" x2="${W}" y2="${H-10}"/>${bars}</svg></div>`;
+    return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line class="axis" x1="0" y1="${H - 10}" x2="${W}" y2="${H - 10}"/>${bars}</svg></div>`;
   }
 
   function renderTable(rows) {
     if (!rows.length) return '';
-    let html = '<table><thead><tr>';
-    rows[0].forEach((c) => { html += `<th>${escapeHtml(c.trim())}</th>`; });
+    let html = '<div class="table-wrap"><table><thead><tr>';
+    rows[0].forEach((c) => { html += `<th>${renderInline(c.trim())}</th>`; });
     html += '</tr></thead><tbody>';
     rows.slice(1).forEach((r) => {
-      html += '<tr>';
-      r.forEach((c) => { html += `<td>${escapeHtml(c.trim())}</td>`; });
-      html += '</tr>';
+      html += '<tr>' + r.map((c) => `<td>${renderInline(c.trim())}</td>`).join('') + '</tr>';
     });
-    return html + '</tbody></table>';
+    return html + '</tbody></table></div>';
   }
 
-  function safeUrl(u) {
-    return /^(https?:\/\/|data:image\/)/i.test(u) ? u : '#';
-  }
-
+  const safeUrl = (u) => (/^(https?:\/\/|data:image\/)/i.test(u) ? u : '#');
   const isImageUrl = (u) => /^data:image\//i.test(u) || /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)(\?.*)?$/i.test(u);
 
   function renderInline(text) {
     let s = escapeHtml(text);
+    const codes = [];
+    s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0001${codes.length - 1}\u0001`; });
     s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, alt, url) =>
-        `<img class="md-img" src="${escapeHtml(safeUrl(url))}" alt="${escapeHtml(alt)}" loading="lazy">`);
+      `<img class="md-img" src="${safeUrl(url)}" alt="${alt}" loading="lazy">`);
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) =>
-        `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`);
+      `<a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, (m, pre, url) =>
+      `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/~~(.+?)~~/g, '<del>$1</del>');
     s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
-    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => `<code>${codes[+i]}</code>`);
     return s;
   }
 
@@ -152,54 +221,62 @@
     const blocks = [];
 
     src = src.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, body) => {
-      if (lang === 'chart') {
-        const nums = (body.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
-        blocks.push(renderChart(nums));
-      } else {
-        blocks.push(highlightCode(body, lang));
-      }
-      return `\u0000B${blocks.length-1}\u0000`;
+      if (lang === 'chart') blocks.push(renderChart((body.match(/-?\d+(?:\.\d+)?/g) || []).map(Number)));
+      else blocks.push(highlightCode(body.replace(/\n$/, ''), lang));
+      return `\n\u0000B${blocks.length - 1}\u0000\n`;
     });
 
-    src = src.replace(/(^\|.+\|\s*\n\|[-\s|:]+\|\s*\n(?:\|.*\|\s*\n?)+)/gm, (block) => {
-      const rows = block.trim().split('\n').filter((l) => !/^\|[\s\-:|]+\|$/.test(l))
-          .map((l) => l.replace(/^\||\|$/g, '').split('|'));
+    src = src.replace(/(^\|.+\|[ \t]*\n\|[-\s|:]+\|[ \t]*\n(?:\|.*\|[ \t]*(?:\n|$))+)/gm, (block) => {
+      const rows = block.trim().split('\n').filter((l) => !/^\|[\s\-:|]+\|$/.test(l.trim()))
+        .map((l) => l.trim().replace(/^\||\|$/g, '').split('|'));
       blocks.push(renderTable(rows));
-      return `\u0000B${blocks.length-1}\u0000`;
+      return `\u0000B${blocks.length - 1}\u0000\n`;
     });
 
-    const lines = src.split('\n');
     const out = [];
     let listType = null;
-    const closeList = () => { if (listType) { out.push(`</${listType}>`); listType = null; } };
+    const openList = (t, cls) => {
+      const key = t + (cls || '');
+      if (listType !== key) { closeList(); out.push(`<${t}${cls ? ` class="${cls}"` : ''}>`); listType = key; }
+    };
+    const closeList = () => { if (listType) { out.push(listType.startsWith('ol') ? '</ol>' : '</ul>'); listType = null; } };
 
-    for (const raw of lines) {
+    for (const raw of src.split('\n')) {
       const ph = raw.match(/^\u0000B(\d+)\u0000$/);
       if (ph) { closeList(); out.push(blocks[+ph[1]]); continue; }
-      if (!raw.trim()) { continue; }
+      if (!raw.trim()) { closeList(); continue; }
 
       const bare = raw.trim();
-      if (/^https?:\/\/\S+$/.test(bare)) {
+      if (/^https?:\/\/\S+$/.test(bare) && isImageUrl(bare)) {
         closeList();
-        if (isImageUrl(bare)) {
-          out.push(`<p class="md-img-block"><img class="md-img" src="${escapeHtml(safeUrl(bare))}" alt="" loading="lazy"></p>`);
-        } else {
-          out.push(`<p><a href="${escapeHtml(safeUrl(bare))}" target="_blank" rel="noopener noreferrer">${escapeHtml(bare)}</a></p>`);
-        }
+        out.push(`<p class="md-img-block"><img class="md-img" src="${escapeHtml(safeUrl(bare))}" alt="" loading="lazy"></p>`);
         continue;
       }
+      if (/^(-{3,}|\*{3,})$/.test(bare)) { closeList(); out.push('<hr>'); continue; }
 
       const h = raw.match(/^(#{1,3})\s+(.+)$/);
       if (h) { closeList(); out.push(`<h${h[1].length}>${renderInline(h[2])}</h${h[1].length}>`); continue; }
 
-      const q = raw.match(/^>\s?(.+)$/);
+      const q = raw.match(/^>\s?(.*)$/);
       if (q) { closeList(); out.push(`<blockquote>${renderInline(q[1])}</blockquote>`); continue; }
 
-      const ul = raw.match(/^[-*]\s+(.+)$/);
-      if (ul) { if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; } out.push(`<li>${renderInline(ul[1])}</li>`); continue; }
+      const cl = raw.match(/^\s*[-*]\s+\[([ xX])\]\s*(.*)$/);
+      if (cl) {
+        openList('ul', 'checklist');
+        const on = cl[1] !== ' ';
+        out.push(`<li class="${on ? 'on' : ''}"><span class="cb">${on ? svgIcon('check', 12, 3) : ''}</span><span>${renderInline(cl[2])}</span></li>`);
+        continue;
+      }
 
-      const ol = raw.match(/^\d+\.\s+(.+)$/);
-      if (ol) { if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; } out.push(`<li>${renderInline(ol[1])}</li>`); continue; }
+      const ul = raw.match(/^\s*[-*]\s+(.+)$/);
+      if (ul) { openList('ul'); out.push(`<li>${renderInline(ul[1])}</li>`); continue; }
+
+      const ol = raw.match(/^\s*(\d+)\.\s+(.*)$/);
+      if (ol) {
+        if (listType !== 'ol') { closeList(); out.push(`<ol start="${+ol[1]}">`); listType = 'ol'; }
+        out.push(`<li>${renderInline(ol[2])}</li>`);
+        continue;
+      }
 
       closeList();
       out.push(`<p>${renderInline(raw)}</p>`);
@@ -208,71 +285,18 @@
     return out.join('');
   }
 
-  /* ====================== ФИЛЬТР / СОРТ ====================== */
+  /* ====================== УВЕДОМЛЕНИЯ ====================== */
 
-  const deleted = (it) => !!it.deleted;
-  const draft = (it) => !!it.draft;
-  // Черновики и удалённые записи ведут себя одинаково с точки зрения
-  // обычных списков/поиска/аналитики — они скрыты отовсюду и всплывают
-  // только в своих отдельных модалках («Черновики» / «Корзина»).
-  const hidden = (it) => deleted(it) || draft(it);
-
-  function sortTasks(items) {
-    return [...items].sort((a, b) => {
-      if (a.done !== b.done) return a.done ? 1 : -1;
-      const ad = a.deadline || Infinity;
-      const bd = b.deadline || Infinity;
-      return ad - bd;
-    });
-  }
-  const sortNotes = (items) => [...items].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-  function applyFilter(items, type) {
-    const q = state.filter.query.trim().toLowerCase();
-    return items.filter((it) => {
-      if (it.type !== type) return false;
-      if (hidden(it)) return false;
-      if (type === 'task' && state.filter.importance !== 'all' && it.importance !== state.filter.importance) return false;
-      if (state.filter.category !== 'all' && (it.category || '') !== state.filter.category) return false;
-      if (q) {
-        const hay = ((it.title||'') + ' ' + (it.body||'') + ' ' + (it.tags||[]).join(' ')).toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }
-
-  /* ====================== СИНХРОНИЗАЦИЯ ====================== */
-
-  let syncStatusTimer = null;
-
-  function setSyncStatus(text, kind) {
-    const el = document.getElementById('syncStatus');
-    if (!el) return;
-    el.className = 'sync-status ' + (kind || '');
-    el.setAttribute('aria-label', text || '');
-    el.title = text || '';
-    if (kind === 'ok' || kind === 'err') {
-      clearTimeout(syncStatusTimer);
-      syncStatusTimer = setTimeout(() => {
-        el.className = 'sync-status';
-        el.removeAttribute('aria-label');
-        el.title = '';
-      }, 2600);
-    }
-  }
-
-  /* --- Тост-уведомления (ненавязчивая обратная связь) --- */
-  function toast(msg, kind = 'info', ms = 2600, action) {
-    const stack = document.getElementById('toastStack');
+  function toast(msg, kind = 'info', ms = 2800, action) {
+    const stack = $('toastStack');
     if (!stack) return;
     const el = document.createElement('div');
     el.className = 'toast ' + kind;
-    el.innerHTML = `<span class="dot"></span><span class="toast-msg">${escapeHtml(msg)}</span>`;
+    el.innerHTML = `<span class="toast-dot"></span><span class="toast-msg">${escapeHtml(msg)}</span>`;
     const dismiss = () => {
       if (!el.isConnected || el.classList.contains('leaving')) return;
       el.classList.add('leaving');
-      setTimeout(() => el.remove(), 200);
+      setTimeout(() => el.remove(), 260);
     };
     if (action) {
       const b = document.createElement('button');
@@ -283,403 +307,454 @@
       el.appendChild(b);
     }
     stack.appendChild(el);
-    setTimeout(dismiss, ms);
+    while (stack.children.length > 3) stack.firstElementChild.remove();
+    setTimeout(dismiss, action ? Math.max(ms, 5000) : ms);
   }
 
-  /* --- Action sheet (iOS) для подтверждения действий --- */
-  function showActionSheet({ title, message, actionText, cancelText = 'Отмена' }) {
+  function askConfirm({ title, message, actionText = 'Удалить', danger = true }) {
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
-      overlay.className = 'sheet-overlay';
-      overlay.setAttribute('role', 'dialog');
+      overlay.className = 'modal-overlay confirm-overlay';
+      overlay.setAttribute('role', 'alertdialog');
       overlay.setAttribute('aria-modal', 'true');
       overlay.innerHTML = `
-        <div class="sheet">
-          ${title ? `<div class="sheet-title">${escapeHtml(title)}</div>` : ''}
-          ${message ? `<div class="sheet-message">${escapeHtml(message)}</div>` : ''}
-          <button class="sheet-btn sheet-danger" type="button">${escapeHtml(actionText)}</button>
-          <button class="sheet-btn sheet-cancel" type="button">${escapeHtml(cancelText)}</button>
-        </div>
-      `;
+        <div class="modal modal-xs confirm">
+          <div class="confirm-title">${escapeHtml(title)}</div>
+          ${message ? `<div class="confirm-msg">${escapeHtml(message)}</div>` : ''}
+          <div class="confirm-actions">
+            <button class="btn ghost" data-act="no" type="button">Отмена</button>
+            <button class="btn ${danger ? 'danger-solid' : 'primary'}" data-act="yes" type="button">${escapeHtml(actionText)}</button>
+          </div>
+        </div>`;
       document.body.appendChild(overlay);
       requestAnimationFrame(() => overlay.classList.add('open'));
       const done = (val) => {
         overlay.classList.remove('open');
-        setTimeout(() => overlay.remove(), 220);
+        document.removeEventListener('keydown', onKey, true);
+        setTimeout(() => overlay.remove(), 240);
         resolve(val);
       };
-      overlay.querySelector('.sheet-danger').addEventListener('click', () => done(true));
-      overlay.querySelector('.sheet-cancel').addEventListener('click', () => done(false));
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(true); }
+      };
+      document.addEventListener('keydown', onKey, true);
+      overlay.querySelector('[data-act="yes"]').addEventListener('click', () => done(true));
+      overlay.querySelector('[data-act="no"]').addEventListener('click', () => done(false));
       overlay.addEventListener('click', (e) => { if (e.target === overlay) done(false); });
+      setTimeout(() => overlay.querySelector('[data-act="yes"]').focus(), 30);
     });
   }
 
-  function askConfirm({ title, message, actionText = 'Удалить' }) {
-    return showActionSheet({ title, message, actionText });
+  function askText({ title, value = '', placeholder = '', actionText = 'Сохранить', extraText = '' }) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay confirm-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.innerHTML = `
+        <form class="modal modal-xs confirm">
+          <div class="confirm-title">${escapeHtml(title)}</div>
+          <input class="input" type="text" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off">
+          <div class="confirm-actions">
+            ${extraText ? `<button class="btn ghost danger" data-act="extra" type="button">${escapeHtml(extraText)}</button><span class="spacer"></span>` : ''}
+            <button class="btn ghost" data-act="no" type="button">Отмена</button>
+            <button class="btn primary" type="submit">${escapeHtml(actionText)}</button>
+          </div>
+        </form>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('open'));
+      const input = overlay.querySelector('input');
+      const done = (val) => {
+        overlay.classList.remove('open');
+        document.removeEventListener('keydown', onKey, true);
+        setTimeout(() => overlay.remove(), 240);
+        resolve(val);
+      };
+      const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+      document.addEventListener('keydown', onKey, true);
+      overlay.querySelector('form').addEventListener('submit', (e) => { e.preventDefault(); done(input.value.trim() || null); });
+      overlay.querySelector('[data-act="no"]').addEventListener('click', () => done(null));
+      const extra = overlay.querySelector('[data-act="extra"]');
+      if (extra) extra.addEventListener('click', () => done({ extra: true }));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+      setTimeout(() => { input.focus(); input.select(); }, 30);
+    });
+  }
+
+  /* ====================== ДАННЫЕ ====================== */
+
+  const isDeleted = (it) => !!it.deleted;
+  const visible = (it) => !it.deleted;
+
+  // Записи, которые не удалось отправить на сервер (нет сети и т.п.).
+  // Повторяем отправку при появлении сети и по таймеру.
+  const pendingSync = new Map();
+  let retryTimer = null;
+
+  function normalizeItem(it) {
+    if (it.type === 'task') it.importance = normImp(it.importance);
+    // Раньше черновики прятались до явного «Сохранить». Теперь всё
+    // сохраняется само, поэтому старые черновики — обычные записи.
+    it.draft = false;
+    return it;
+  }
+
+  function upsertLocal(item) {
+    const idx = state.items.findIndex((x) => x.id === item.id);
+    if (idx >= 0) state.items[idx] = item; else state.items.push(item);
   }
 
   async function loadItems() {
-    if (!Auth.isSignedIn()) { state.items = []; return; }
-    setSyncStatus('Загрузка…', 'busy');
+    if (!Auth.isSignedIn()) { state.items = []; state.loaded = true; return; }
     try {
-      await DB.purgeExpired();
-      await DB.purgeExpiredDrafts();
+      await DB.purgeExpired().catch(() => {});
       const all = await DB.allItems();
-      // Служебные записи (настройки ИИ, ссылки) не должны попадать в обычные
-      // списки/фильтры/метрики — убираем их здесь один раз.
-      state.items = all.filter((x) => !SERVICE_IDS.has(x.id));
-      setSyncStatus('Сохранено', 'ok');
+      state.items = all.filter((x) => !SERVICE_IDS.has(x.id)).map(normalizeItem);
+      // Локальные несохранённые правки важнее того, что пришло с сервера.
+      pendingSync.forEach((it) => upsertLocal(it));
     } catch (e) {
       console.error('[load]', e);
-      setSyncStatus('Ошибка загрузки', 'err');
+      toast('Не удалось загрузить записи', 'err');
+    }
+    state.loaded = true;
+  }
+
+  async function persist(item, { touch = true } = {}) {
+    if (touch) item.updatedAt = Date.now();
+    item.draft = false;
+    upsertLocal(item);
+    if (!Auth.isSignedIn()) throw new Error('Нужно войти в аккаунт');
+    try {
+      const saved = normalizeItem(await DB.upsertItem(item));
+      // Пока шёл запрос, запись могли изменить ещё раз — не затираем свежее.
+      const cur = state.items.find((x) => x.id === saved.id);
+      if (!cur || (cur.updatedAt || 0) <= (item.updatedAt || 0)) upsertLocal(saved);
+      pendingSync.delete(item.id);
+      return saved;
+    } catch (e) {
+      pendingSync.set(item.id, item);
+      scheduleRetry();
+      throw e;
     }
   }
 
-  async function persist(item) {
-    item.updatedAt = Date.now();
-    const idx = state.items.findIndex((x) => x.id === item.id);
-    if (idx >= 0) state.items[idx] = item; else state.items.push(item);
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(retryPending, RETRY_DELAY * 3);
+  }
 
-    if (!Auth.isSignedIn()) { setSyncStatus('Не авторизован', 'err'); return; }
-
-    setSyncStatus('Сохранение…', 'busy');
-    try {
-      const saved = await DB.upsertItem(item);
-      const i = state.items.findIndex((x) => x.id === saved.id);
-      if (i >= 0) state.items[i] = saved;
-      setSyncStatus('Сохранено', 'ok');
-    } catch (e) {
-      console.error('[save]', e);
-      setSyncStatus('Ошибка сохранения', 'err');
+  async function retryPending() {
+    if (!pendingSync.size || !Auth.isSignedIn()) return;
+    const list = [...pendingSync.values()];
+    let ok = 0;
+    for (const it of list) {
+      try { await persist(it, { touch: false }); ok++; } catch { /* останется в очереди */ }
     }
+    if (ok && !pendingSync.size) toast('Все изменения сохранены', 'ok');
+  }
+
+  const persistQuiet = (item) => persist(item).catch((e) => {
+    console.error('[save]', e);
+    toast('Нет связи — сохраню, когда появится сеть', 'err', 3600);
+  });
+
+  async function softDeleteItem(id) {
+    const it = state.items.find((x) => x.id === id);
+    if (!it) return null;
+    it.deleted = true;
+    it.deletedAt = Date.now();
+    await persistQuiet(it);
+    return it;
+  }
+
+  async function restoreItem(id) {
+    const it = state.items.find((x) => x.id === id);
+    if (!it) return;
+    it.deleted = false;
+    delete it.deletedAt;
+    await persistQuiet(it);
   }
 
   async function purgeItem(id) {
     state.items = state.items.filter((x) => x.id !== id);
+    pendingSync.delete(id);
     if (!Auth.isSignedIn()) return;
-    try {
-      await DB.deleteItem(id);
-      setSyncStatus('Сохранено', 'ok');
-    } catch (e) {
-      console.error('[delete]', e);
-      setSyncStatus('Ошибка удаления', 'err');
-    }
+    try { await DB.deleteItem(id); } catch (e) { console.error('[delete]', e); toast('Ошибка удаления', 'err'); }
   }
 
-  async function softDeleteItem(id) {
-    const it = state.items.find((x) => x.id === id);
+  // Удаление с возможностью «Отменить» вместо подтверждающего окна.
+  async function deleteWithUndo(id) {
+    const it = await softDeleteItem(id);
+    render();
     if (!it) return;
-    it.deleted = true; it.deletedAt = Date.now();
-    await persist(it);
-  }
-  async function restoreItem(id) {
-    const it = state.items.find((x) => x.id === id);
-    if (!it) return;
-    it.deleted = false; delete it.deletedAt;
-    await persist(it);
+    toast('Перемещено в корзину', 'info', 5000, {
+      label: 'Отменить',
+      onClick: async () => { await restoreItem(id); render(); },
+    });
   }
 
-  /* ====================== ИИ: БЫСТРОЕ ДОБАВЛЕНИЕ С ГЛАВНОГО ЭКРАНА ====================== */
+  /* ====================== ТЕМА ====================== */
 
-  async function runQuickAdd(text, btn, input) {
-    if (!text) return;
-    if (!AI.config.enabled) {
-      toast('ИИ не настроен — открой «Настройки» → ИИ', 'err');
-      return;
-    }
-    if (!Auth.isSignedIn()) {
-      toast('Нужно войти в аккаунт, чтобы сохранять записи', 'err');
-      return;
-    }
+  const systemLight = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  const resolvedTheme = () => (state.themePref === 'system' ? (systemLight() ? 'light' : 'dark') : state.themePref);
 
-    const prevLabel = btn.textContent;
-    btn.disabled = true; input.disabled = true;
-    btn.textContent = 'Думаю…';
+  function applyTheme() {
+    const root = document.documentElement;
+    root.classList.add('theme-switching');
+    root.dataset.theme = resolvedTheme();
+    root.dataset.accent = state.accent;
     try {
-      const parsed = await AI.createFromText(text);
-      const now = Date.now();
-      const item = {
-        id: uid(),
-        type: parsed.type,
-        title: parsed.title,
-        body: parsed.body,
-        category: parsed.category,
-        tags: parsed.tags,
-        font: 'sans',
-        done: false,
-        deleted: false,
-        createdAt: now,
-      };
-      if (parsed.type === 'task') {
-        item.importance = parsed.importance;
-        item.deadline = parsed.deadline;
-      }
-      await persist(item);
-      if (window.Links) Links.ingestFromItem(item);
-      input.value = '';
-      render();
-      toast(`Добавлено: ${parsed.title || 'запись'}`, 'ok');
-    } catch (e) {
-      console.error('[quick-add]', e);
-      toast('Не получилось разобрать запрос', 'err');
-    } finally {
-      btn.disabled = false; input.disabled = false;
-      btn.textContent = prevLabel;
-    }
-  }
-
-  /* ====================== ТЕМА / РЕЖИМ ====================== */
-
-  function applyTheme(name) {
-    state.theme = name;
-    document.body.dataset.theme = name;
+      localStorage.setItem('nf.theme', state.themePref);
+      localStorage.setItem('nf.accent', state.accent);
+    } catch { /* ignore */ }
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) {
-      const bg = getComputedStyle(document.body).getPropertyValue('--bg').trim();
-      meta.setAttribute('content', bg || '#000000');
-    }
-    const el = document.getElementById('themeLabel');
-    if (el) el.textContent = THEME_LABELS[name] || name;
-    localStorage.setItem('nf.theme', name);
+    if (meta) meta.setAttribute('content', getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#09090b');
+    setTimeout(() => root.classList.remove('theme-switching'), 400);
   }
-  function cycleTheme() {
-    const idx = THEMES.indexOf(state.theme);
-    applyTheme(THEMES[(idx + 1) % THEMES.length]);
+
+  function toggleTheme() {
+    state.themePref = resolvedTheme() === 'dark' ? 'light' : 'dark';
+    applyTheme();
+    if ($('settingsOverlay').classList.contains('open')) renderSettings();
   }
-  function updateModeButton() {
+
+  /* ====================== ВКЛАДКИ ====================== */
+
+  function moveIndicator(container) {
+    if (!container) return;
+    const ind = container.querySelector('.tabs-indicator, .seg-indicator');
+    const active = container.querySelector('button.active');
+    if (!ind || !active) return;
+    ind.style.width = active.offsetWidth + 'px';
+    ind.style.transform = `translateX(${active.offsetLeft}px)`;
+  }
+
+  function updateModeTabs() {
     document.querySelectorAll('#modeTabs button').forEach((b) => {
       const on = b.dataset.mode === state.mode;
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', String(on));
     });
+    moveIndicator($('modeTabs'));
+    const fab = $('fabAdd');
+    if (fab) fab.title = state.mode === 'tasks' ? 'Новая задача' : state.mode === 'notes' ? 'Новая заметка' : 'Добавить ссылку';
   }
+
   function setMode(mode) {
+    if (!['tasks', 'notes', 'links'].includes(mode)) mode = 'tasks';
     if (state.mode === mode) return;
     state.mode = mode;
-    localStorage.setItem('nf.mode', state.mode);
-    updateModeButton();
+    try { localStorage.setItem('nf.mode', mode); } catch { /* ignore */ }
+    state.animateNext = true;
+    updateModeTabs();
     render();
-  }
-  function toggleMode() {
-    state.mode = state.mode === 'tasks' ? 'notes' : state.mode === 'notes' ? 'links' : 'tasks';
-    localStorage.setItem('nf.mode', state.mode);
-    updateModeButton();
-    render();
+    window.scrollTo({ top: 0 });
   }
 
-  /* ====================== РЕНДЕР ====================== */
+  /* ====================== РЕНДЕР ГЛАВНОГО ЭКРАНА ====================== */
 
   function render() {
-    const root = document.getElementById('viewRoot');
+    const root = $('viewRoot');
+    const animate = state.animateNext;
+    state.animateNext = false;
+    root.classList.toggle('animate', animate);
+
+    if (!state.authReady) { root.innerHTML = renderSkeleton(); return; }
+    if (!Auth.isConfigured() || !Auth.isSignedIn()) {
+      root.innerHTML = renderWelcome();
+      bindWelcome();
+      return;
+    }
+    if (!state.loaded) { root.innerHTML = renderSkeleton(); return; }
+
     if (state.mode === 'tasks') root.innerHTML = renderTasksView();
     else if (state.mode === 'notes') root.innerHTML = renderNotesView();
     else root.innerHTML = renderLinksView();
-    bindViewEvents();
-    if (state.mode === 'links') bindLinksView();
+
+    if (state.mode === 'links') bindLinksView(); else bindRows(root);
+    const add = $('addBtn');
+    if (add) add.addEventListener('click', addForCurrentMode);
   }
 
-  function allCategories(type) {
-    const set = new Set();
-    state.items.forEach((it) => { if (it.type === type && it.category && !hidden(it)) set.add(it.category); });
-    return [...set].sort();
+  function renderSkeleton() {
+    return `<div class="skeleton">${'<div class="sk-row"></div>'.repeat(4)}</div>`;
   }
 
-  const renderQuickAddBar = () => '';
-
-  function renderFiltersPanel() {
-    const cats = allCategories(state.mode === 'tasks' ? 'task' : 'note');
-    const catOptions = ['<option value="all">Все категории</option>']
-        .concat(cats.map((c) => `<option value="${escapeHtml(c)}" ${state.filter.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`))
-        .join('');
-
-    const impChips = state.mode === 'tasks' ? `
-      <button class="chip ${state.filter.importance==='all'?'active':''}" data-imp="all">Все</button>
-      <button class="chip ${state.filter.importance==='red'?'active':''}" data-imp="red"><span class="dot" style="background:var(--err)"></span>Важно</button>
-      <button class="chip ${state.filter.importance==='yellow'?'active':''}" data-imp="yellow"><span class="dot" style="background:var(--warn)"></span>Средне</button>
-      <button class="chip ${state.filter.importance==='green'?'active':''}" data-imp="green"><span class="dot" style="background:var(--ok)"></span>Не срочно</button>
-    ` : '';
-
+  function renderWelcome() {
+    const configured = Auth.isConfigured();
     return `
-      <div class="filters-panel ${state.filtersOpen ? 'open' : ''}" id="filtersPanel">
-        <div class="filters-inner">
-          <div class="search-box">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="filterQuery" placeholder="Поиск…" value="${escapeHtml(state.filter.query)}">
-          </div>
-          <div class="chip-row">${impChips}</div>
-          <select class="select-sm" id="filterCategory">${catOptions}</select>
-        </div>
-      </div>
-    `;
+      <section class="welcome">
+        <div class="welcome-mark">nf</div>
+        <h1>Задачи, заметки и ссылки — в одном месте</h1>
+        <p>Всё сохраняется само и синхронизируется между устройствами.</p>
+        ${configured
+          ? `<button class="btn primary lg" id="welcomeLogin">${googleIcon()} Войти через Google</button>`
+          : `<p class="hint">Supabase не настроен. Заполни <code>SUPABASE_URL</code> и <code>SUPABASE_ANON_KEY</code> в <code>.env</code> и перезапусти сервер.</p>`}
+      </section>`;
   }
 
-  function tagChips(list) {
-    const arr = list || [];
-    const shown = arr.slice(0, 3).map((t) => `<span class="mini-tag">#${escapeHtml(t)}</span>`).join('');
-    return shown + (arr.length > 3 ? `<span class="mini-tag muted">+${arr.length - 3}</span>` : '');
+  function bindWelcome() {
+    const b = $('welcomeLogin');
+    if (b) b.addEventListener('click', () => Auth.signInWithGoogle().catch((e) => toast(e.message, 'err')));
   }
 
-  function renderTaskRow(it) {
-    const rem = it.done ? null : remaining(it.deadline);
-    const cls = rem
-        ? (rem.kind === 'overdue' ? 'timer overdue'
-            : rem.kind === 'soon'   ? 'timer soon'
-                : 'timer')
-        : 'timer';
-    const tags = tagChips(it.tags);
-    const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
-    const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 200))}</div>` : '';
-    const deadlineSpan = it.deadline
-        ? `<span class="${cls}">${rem ? escapeHtml(rem.text) + ' · ' : ''}${escapeHtml(fmtTime(it.deadline))}</span>`
-        : '';
-    return `
-      <div class="swipe-item" data-id="${it.id}">
-        <div class="swipe-actions">
-          <button class="swipe-delete" data-swipe-delete="${it.id}" aria-label="Удалить">Удалить</button>
-        </div>
-        <div class="item-row clickable ${it.done ? 'done' : ''}" data-id="${it.id}">
-          <span class="importance-dot ${it.importance || 'green'}"></span>
-          <div class="checkbox ${it.done ? 'checked' : ''}" data-toggle="${it.id}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-          </div>
-          <div class="item-body">
-            <div class="item-title ${it.done ? 'done' : ''}">${escapeHtml(it.title || '(без названия)')}</div>
-            ${desc}
-            <div class="item-meta">
-              ${cat}${tags}
-              ${deadlineSpan}
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  function renderNoteRow(it) {
-    const tags = tagChips(it.tags);
-    const cat = it.category ? `<span class="mini-tag muted">${escapeHtml(it.category)}</span>` : '';
-    const desc = it.body ? `<div class="item-desc">${escapeHtml(it.body.replace(/```[\s\S]*?```/g, '[код]').slice(0, 220))}</div>` : '';
-    return `
-      <div class="swipe-item" data-id="${it.id}">
-        <div class="swipe-actions">
-          <button class="swipe-delete" data-swipe-delete="${it.id}" aria-label="Удалить">Удалить</button>
-        </div>
-        <div class="item-row clickable" data-id="${it.id}">
-          <div class="item-body">
-            <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
-            ${desc}
-            <div class="item-meta">${cat}${tags}</div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  function renderTasksView() {
-    const activeTasks = state.items.filter((x) => x.type === 'task' && !hidden(x));
-    const sortedActive = sortTasks(activeTasks.filter((x) => !x.done));
-    const sortedDone = sortTasks(activeTasks.filter((x) => x.done));
-    const total = activeTasks.length;
-    const done = activeTasks.filter((x) => x.done).length;
-    const active = total - done;
-
-    const completedSection = sortedDone.length ? `
-      <div class="section-title">Выполнено · ${sortedDone.length}</div>
-      <div class="list">${sortedDone.map(renderTaskRow).join('')}</div>
-    ` : '';
-
+  function viewHead(title, sub, addLabel) {
     return `
       <div class="view-head">
         <div>
-          <h1 class="view-title">Задачи</h1>
-          <div class="view-sub">${active} активных · ${done} выполнено</div>
+          <h1 class="view-title">${title}</h1>
+          <div class="view-sub">${sub}</div>
         </div>
-        <div class="view-actions">
-          <button class="btn primary" id="addBtn">+ Добавить</button>
-        </div>
-      </div>
-
-      ${renderQuickAddBar()}
-
-      <div class="list">
-        ${sortedActive.length ? sortedActive.map(renderTaskRow).join('') : '<div class="empty-state">Нет активных задач</div>'}
-      </div>
-
-      ${completedSection}
-    `;
+        ${addLabel ? `<button class="btn primary add-btn" id="addBtn">${svgIcon('plus', 16, 2.2)}<span>${addLabel}</span></button>` : ''}
+      </div>`;
   }
 
-  function renderNotesView() {
-    const all = state.items.filter((x) => x.type === 'note' && !hidden(x));
-    const sorted = sortNotes(all);
-
-    return `
-      <div class="view-head">
-        <div>
-          <h1 class="view-title">Заметки</h1>
-          <div class="view-sub">${all.length} записей</div>
-        </div>
-        <div class="view-actions">
-          <button class="btn primary" id="addBtn">+ Добавить</button>
-        </div>
-      </div>
-
-      ${renderQuickAddBar()}
-
-      <div class="list">
-        ${sorted.length ? sorted.map(renderNoteRow).join('') : '<div class="empty-state">Пока нет заметок</div>'}
-      </div>
-    `;
-  }
-
-  /* ====================== СОБЫТИЯ ГЛАВНОГО ЭКРАНА ====================== */
-
-  function bindViewEvents() {
-    const addBtn = document.getElementById('addBtn');
-    if (addBtn) addBtn.addEventListener('click', openAddSheet);
-
-    const quickAddBtn = document.getElementById('quickAddBtn');
-    const quickAddInput = document.getElementById('quickAddInput');
-    if (quickAddBtn && quickAddInput) {
-      const run = () => runQuickAdd(quickAddInput.value.trim(), quickAddBtn, quickAddInput);
-      quickAddBtn.addEventListener('click', run);
-      quickAddInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
-    }
-
-    bindRowEvents(document.getElementById('viewRoot'));
-  }
-
-  /* ====================== SWIPE-TO-DELETE ====================== */
-
-  const SWIPE_WIDTH = 84;
-
-  function closeAllSwipes(except) {
-    document.querySelectorAll('.swipe-item.open').forEach((el) => {
-      if (el === except) return;
-      el.classList.remove('open');
-      const c = el.querySelector('.item-row');
-      if (c) c.style.transform = '';
+  function sortActiveTasks(items) {
+    return [...items].sort((a, b) => {
+      const ad = a.deadline || Infinity, bd = b.deadline || Infinity;
+      if (ad !== bd) return ad - bd;
+      if (a.importance !== b.importance) return a.importance === 'red' ? -1 : 1;
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
     });
   }
 
-  function openSwipe(el) {
-    closeAllSwipes(el);
-    el.classList.add('open');
-    const c = el.querySelector('.item-row');
-    if (c) c.style.transform = `translateX(-${SWIPE_WIDTH}px)`;
+  function renderTasksView() {
+    const tasks = state.items.filter((x) => x.type === 'task' && visible(x));
+    const active = sortActiveTasks(tasks.filter((x) => !x.done));
+    const done = tasks.filter((x) => x.done).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const shownDone = done.slice(0, DONE_VISIBLE);
+    const important = active.filter((x) => x.importance === 'red').length;
+    const overdue = active.filter((x) => x.deadline && x.deadline < Date.now()).length;
+
+    const subParts = [`${active.length} ${plural(active.length, 'активная', 'активные', 'активных')}`];
+    if (important) subParts.push(`<span class="sub-red">${important} ${plural(important, 'важная', 'важные', 'важных')}</span>`);
+    if (overdue) subParts.push(`<span class="sub-red">${overdue} просрочено</span>`);
+
+    let i = 0;
+    const activeHtml = active.length
+      ? `<div class="list">${active.map((t) => renderTaskRow(t, i++)).join('')}</div>`
+      : `<div class="empty">${svgIcon('task', 28, 1.5)}<div>Всё сделано</div><small>Нажми «+», чтобы добавить задачу</small></div>`;
+
+    const doneHtml = shownDone.length ? `
+      <div class="section-head">
+        <span>Недавно выполненные</span>
+        <span class="section-count">${done.length > DONE_VISIBLE ? `${DONE_VISIBLE} из ${done.length}` : done.length}</span>
+      </div>
+      <div class="list list-done">${shownDone.map((t) => renderTaskRow(t, i++)).join('')}</div>
+      ${done.length > DONE_VISIBLE ? `<button class="more-link" id="showDoneSearch">Остальные выполненные — в поиске</button>` : ''}
+    ` : '';
+
+    return viewHead('Задачи', subParts.join(' · '), 'Задача') + activeHtml + doneHtml;
   }
+
+  function renderNotesView() {
+    const notes = state.items.filter((x) => x.type === 'note' && visible(x))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const sub = `${notes.length} ${plural(notes.length, 'заметка', 'заметки', 'заметок')}`;
+    const body = notes.length
+      ? `<div class="notes-grid">${notes.map(renderNoteCard).join('')}</div>`
+      : `<div class="empty">${svgIcon('note', 28, 1.5)}<div>Пока нет заметок</div><small>Нажми «+», чтобы записать мысль</small></div>`;
+    return viewHead('Заметки', sub, 'Заметка') + body;
+  }
+
+  function swipeWrap(id, i, inner, extraCls = '') {
+    return `
+      <div class="swipe-item ${extraCls}" data-id="${id}" style="--i:${Math.min(i, 14)}">
+        <div class="swipe-actions"><button class="swipe-delete" data-swipe-delete aria-label="Удалить">${svgIcon('trash', 18)}</button></div>
+        ${inner}
+      </div>`;
+  }
+
+  function renderTaskRow(it, i) {
+    const rem = it.done ? null : remaining(it.deadline);
+    const desc = plainPreview(it.body, 160);
+    const meta = [];
+    if (it.deadline) {
+      meta.push(`<span class="meta-pill ${rem ? rem.kind : 'muted'}" title="${escapeHtml(fmtTime(it.deadline))}">${svgIcon('clock', 12, 2)}${escapeHtml(fmtHuman(it.deadline))}${rem && rem.kind !== 'ok' ? ` · ${escapeHtml(rem.text)}` : ''}</span>`);
+    }
+    if (it.importance === 'red' && !it.done) meta.push('<span class="meta-pill red"><span class="dot red"></span>Важно</span>');
+    const inner = `
+      <div class="row task-row ${it.done ? 'done' : ''} imp-${it.importance}" data-open="${it.id}" tabindex="0">
+        <button class="check" data-toggle="${it.id}" aria-label="${it.done ? 'Вернуть в работу' : 'Отметить выполненной'}" aria-pressed="${it.done}">
+          ${svgIcon('check', 13, 3)}
+        </button>
+        <div class="row-body">
+          <div class="row-title"><span>${escapeHtml(it.title || plainPreview(it.body, 80) || 'Без названия')}</span></div>
+          ${desc && it.title ? `<div class="row-desc">${escapeHtml(desc)}</div>` : ''}
+          ${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}
+        </div>
+        <button class="row-del" data-del="${it.id}" title="В корзину" aria-label="В корзину">${svgIcon('trash', 16)}</button>
+      </div>`;
+    return swipeWrap(it.id, i, inner);
+  }
+
+  function renderNoteCard(it, i) {
+    const desc = plainPreview(it.body, 260);
+    const inner = `
+      <div class="row note-card ${it.font === 'mono' ? 'mono' : ''}" data-open="${it.id}" tabindex="0">
+        <div class="row-body">
+          <div class="row-title">${escapeHtml(it.title || 'Без названия')}</div>
+          ${desc ? `<div class="row-desc clamp-4">${escapeHtml(desc)}</div>` : ''}
+          <div class="row-meta"><span class="meta-plain">${escapeHtml(fmtHuman(it.updatedAt))}</span></div>
+        </div>
+        <button class="row-del" data-del="${it.id}" title="В корзину" aria-label="В корзину">${svgIcon('trash', 16)}</button>
+      </div>`;
+    return swipeWrap(it.id, i, inner);
+  }
+
+  /* ====================== СОБЫТИЯ СПИСКОВ ====================== */
+
+  function bindRows(scope) {
+    scope.querySelectorAll('[data-toggle]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const it = state.items.find((x) => x.id === el.dataset.toggle);
+        if (!it) return;
+        it.done = !it.done;
+        const row = el.closest('.swipe-item');
+        if (row) row.classList.add(it.done ? 'completing' : 'reopening');
+        el.setAttribute('aria-pressed', String(it.done));
+        el.closest('.row').classList.toggle('done', it.done);
+        persistQuiet(it);
+        setTimeout(render, 420);
+      });
+    });
+
+    scope.querySelectorAll('[data-open]').forEach((el) => {
+      const open = () => {
+        const sw = el.closest('.swipe-item');
+        if (sw && sw.classList.contains('open')) { closeSwipe(sw); return; }
+        const it = state.items.find((x) => x.id === el.dataset.open);
+        if (it) openEditor(it);
+      };
+      el.addEventListener('click', (e) => { if (!e.target.closest('button')) open(); });
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) open(); });
+    });
+
+    scope.querySelectorAll('[data-del]').forEach((b) => {
+      b.addEventListener('click', (e) => { e.stopPropagation(); deleteWithUndo(b.dataset.del); });
+    });
+
+    const more = $('showDoneSearch');
+    if (more) more.addEventListener('click', () => openSearch('done'));
+
+    bindSwipe(scope);
+  }
+
+  /* --- Свайп влево для удаления (телефоны) --- */
+  const SWIPE_WIDTH = 76;
 
   function closeSwipe(el) {
     el.classList.remove('open');
-    const c = el.querySelector('.item-row');
+    const c = el.querySelector('.row');
     if (c) c.style.transform = '';
+    setTimeout(() => { if (!el.classList.contains('open')) el.classList.remove('swiping'); }, 360);
   }
 
   function bindSwipe(scope) {
     scope.querySelectorAll('.swipe-item').forEach((el) => {
-      if (el.dataset.swipeBound) return;
-      el.dataset.swipeBound = '1';
-      const content = el.querySelector('.item-row');
+      const content = el.querySelector('.row');
       let startX = null, startY = null, dragging = false, baseX = 0, lastX = 0;
 
       el.addEventListener('touchstart', (e) => {
@@ -689,7 +764,7 @@
         dragging = false;
         baseX = el.classList.contains('open') ? -SWIPE_WIDTH : 0;
         lastX = baseX;
-        closeAllSwipes(el);
+        document.querySelectorAll('.swipe-item.open').forEach((o) => { if (o !== el) closeSwipe(o); });
       }, { passive: true });
 
       el.addEventListener('touchmove', (e) => {
@@ -700,1776 +775,1269 @@
           if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
           if (Math.abs(dy) > Math.abs(dx)) { startX = null; return; }
           dragging = true;
+          el.classList.add('swiping');
+          content.style.transition = 'none';
         }
         e.preventDefault();
-        lastX = Math.max(-SWIPE_WIDTH - 8, Math.min(0, baseX + dx));
+        lastX = Math.max(-SWIPE_WIDTH - 24, Math.min(0, baseX + dx));
         content.style.transform = `translateX(${lastX}px)`;
       }, { passive: false });
 
       el.addEventListener('touchend', () => {
         if (startX === null) return;
-        const wasDragging = dragging;
+        const was = dragging;
         startX = null; dragging = false;
-        if (!wasDragging) return;
-        if (lastX < -40) openSwipe(el); else closeSwipe(el);
+        content.style.transition = '';
+        if (!was) return;
+        if (lastX < -36) { el.classList.add('open'); content.style.transform = `translateX(-${SWIPE_WIDTH}px)`; }
+        else closeSwipe(el);
       });
 
-      el.querySelector('.swipe-delete').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = el.dataset.id;
-        const it = state.items.find((x) => x.id === id);
-        if (!it) return;
-        const ok = await askConfirm({
-          title: 'Удалить?',
-          message: `«${it.title || 'Без названия'}» будет перемещена в корзину на 14 дней.`,
-          actionText: 'Удалить',
-        });
-        if (ok) {
-          await softDeleteItem(id);
-          toast('Перемещено в корзину', 'info');
-          render();
-        } else {
-          closeSwipe(el);
-        }
-      });
+      const del = el.querySelector('[data-swipe-delete]');
+      if (del) del.addEventListener('click', (e) => { e.stopPropagation(); deleteWithUndo(el.dataset.id); });
     });
   }
 
-  function bindRowEvents(scope) {
-    scope.querySelectorAll('.checkbox[data-toggle]').forEach((el) => {
-      if (el.dataset.bound) return;
-      el.dataset.bound = '1';
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const it = state.items.find((x) => x.id === el.dataset.toggle);
-        if (!it) return;
-        it.done = !it.done;
-        // Оптимистичный UI: перерисовываем сразу, не дожидаясь ответа сети.
-        render();
-        persist(it).catch((err) => console.error('[toggle]', err));
-      });
+  /* ====================== РЕДАКТОР (с автосохранением) ====================== */
+
+  const editor = {
+    overlay: null, modal: null, scroll: null,
+    titleEl: null, bodyEl: null, previewEl: null, deadlineEl: null,
+    importance: 'green', font: 'sans', done: false, preview: false,
+    dirty: false, timer: null, chain: Promise.resolve(),
+  };
+
+  const TOOL_GROUPS = [
+    [
+      { id: 'heading', icon: 'heading', label: 'Заголовок' },
+      { id: 'bold', icon: 'bold', label: 'Жирный', key: 'Ctrl+B' },
+      { id: 'italic', icon: 'italic', label: 'Курсив', key: 'Ctrl+I' },
+      { id: 'strike', icon: 'strike', label: 'Зачёркнутый' },
+    ],
+    [
+      { id: 'ul', icon: 'ul', label: 'Список' },
+      { id: 'ol', icon: 'ol', label: 'Нумерованный список' },
+      { id: 'checklist', icon: 'checklist', label: 'Чек-лист' },
+      { id: 'quote', icon: 'quote', label: 'Цитата' },
+    ],
+    [
+      { id: 'code', icon: 'code', label: 'Код' },
+      { id: 'link', icon: 'link', label: 'Ссылка', key: 'Ctrl+K' },
+      { id: 'table', icon: 'table', label: 'Таблица' },
+      { id: 'image', icon: 'image', label: 'Изображение' },
+      { id: 'chart', icon: 'chart', label: 'График' },
+    ],
+  ];
+
+  function renderToolbar() {
+    const groups = TOOL_GROUPS.map((g) => `<div class="tool-group">${g.map((t) =>
+      `<button type="button" class="tool" data-tool="${t.id}" title="${t.label}${t.key ? ' (' + t.key + ')' : ''}" aria-label="${t.label}">${svgIcon(t.icon, 17)}</button>`
+    ).join('')}</div>`).join('<span class="tool-sep"></span>');
+    $('editorToolbar').innerHTML = `
+      <div class="tool-scroll">${groups}</div>
+      <div class="tool-group tool-right">
+        <button type="button" class="tool" data-tool="font" title="Моноширинный шрифт" aria-label="Моноширинный шрифт" aria-pressed="false">${svgIcon('mono', 17)}</button>
+        <button type="button" class="tool" data-tool="preview" title="Просмотр" aria-label="Просмотр" aria-pressed="false">${svgIcon('eye', 17)}</button>
+      </div>`;
+  }
+
+  /* --- Правка текста с сохранением истории «Отменить» (Ctrl+Z) --- */
+  function replaceRange(start, end, text, selStart, selEnd) {
+    const ta = editor.bodyEl;
+    ta.focus();
+    ta.setSelectionRange(start, end);
+    let ok = false;
+    try { ok = document.execCommand('insertText', false, text); } catch { ok = false; }
+    if (!ok || ta.value.slice(start, start + text.length) !== text) {
+      ta.setRangeText(text, start, end, 'end');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const s = selStart ?? start + text.length;
+    ta.setSelectionRange(s, selEnd ?? s);
+  }
+
+  function wrapSelection(before, after, placeholder) {
+    const ta = editor.bodyEl;
+    const { selectionStart: a, selectionEnd: b, value: v } = ta;
+    // Повторное нажатие снимает форматирование.
+    if (v.slice(a - before.length, a) === before && v.slice(b, b + after.length) === after) {
+      replaceRange(a - before.length, b + after.length, v.slice(a, b), a - before.length, b - before.length);
+      return;
+    }
+    const inner = v.slice(a, b) || placeholder;
+    replaceRange(a, b, before + inner + after, a + before.length, a + before.length + inner.length);
+  }
+
+  function lineBounds() {
+    const ta = editor.bodyEl;
+    const v = ta.value;
+    let { selectionStart: a, selectionEnd: b } = ta;
+    if (b > a && v[b - 1] === '\n') b--;
+    const ls = v.lastIndexOf('\n', a - 1) + 1;
+    let le = v.indexOf('\n', b);
+    if (le === -1) le = v.length;
+    return { ls, le };
+  }
+
+  const PREFIX_RE = {
+    checklist: /^(\s*)[-*]\s+\[[ xX]\]\s?/,
+    ul: /^(\s*)[-*]\s+/,
+    ol: /^(\s*)\d+\.\s+/,
+    quote: /^(\s*)>\s?/,
+  };
+  const anyListPrefix = /^(\s*)([-*]\s+\[[ xX]\]\s?|[-*]\s+|\d+\.\s+|>\s?)/;
+
+  function hasPrefix(line, kind) {
+    if (kind === 'ul') return PREFIX_RE.ul.test(line) && !PREFIX_RE.checklist.test(line);
+    return PREFIX_RE[kind].test(line);
+  }
+
+  function toggleLinePrefix(kind) {
+    const ta = editor.bodyEl;
+    const { ls, le } = lineBounds();
+    const lines = ta.value.slice(ls, le).split('\n');
+    const nonEmpty = lines.filter((l) => l.trim());
+    const allHave = nonEmpty.length && nonEmpty.every((l) => hasPrefix(l, kind));
+    let n = 0;
+    const out = lines.map((l) => {
+      if (!l.trim() && lines.length > 1) return l;
+      const stripped = l.replace(anyListPrefix, '$1');
+      if (allHave) return stripped;
+      const indent = (stripped.match(/^\s*/) || [''])[0];
+      const rest = stripped.slice(indent.length);
+      const prefix = kind === 'ul' ? '- ' : kind === 'checklist' ? '- [ ] ' : kind === 'quote' ? '> ' : `${++n}. `;
+      return indent + prefix + rest;
+    }).join('\n');
+    replaceRange(ls, le, out, ls + out.length);
+  }
+
+  function toggleHeading() {
+    const ta = editor.bodyEl;
+    const { ls, le } = lineBounds();
+    const line = ta.value.slice(ls, le).split('\n')[0];
+    const lineEnd = ls + line.length;
+    const m = line.match(/^(#{1,3})\s+/);
+    const level = m ? m[1].length : 0;
+    const rest = m ? line.slice(m[0].length) : line;
+    const next = level >= 3 ? rest : '#'.repeat(level + 1) + ' ' + rest;
+    replaceRange(ls, lineEnd, next, ls + next.length);
+  }
+
+  function insertBlock(text, selectFrom, selectLen) {
+    const ta = editor.bodyEl;
+    const { selectionStart: a, selectionEnd: b, value: v } = ta;
+    const before = a > 0 && v[a - 1] !== '\n' ? '\n' : '';
+    const after = v[b] && v[b] !== '\n' ? '\n' : '';
+    const full = before + text + after;
+    const s = selectFrom != null ? a + before.length + selectFrom : a + full.length;
+    replaceRange(a, b, full, s, selectLen != null ? s + selectLen : s);
+  }
+
+  function applyTool(id) {
+    if (id === 'font') { setFont(editor.font === 'mono' ? 'sans' : 'mono'); scheduleSave(); return; }
+    if (id === 'preview') { setPreview(!editor.preview); return; }
+    if (editor.preview) setPreview(false);
+    const ta = editor.bodyEl;
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    switch (id) {
+      case 'heading': toggleHeading(); break;
+      case 'bold': wrapSelection('**', '**', 'жирный'); break;
+      case 'italic': wrapSelection('*', '*', 'курсив'); break;
+      case 'strike': wrapSelection('~~', '~~', 'текст'); break;
+      case 'ul': case 'ol': case 'checklist': case 'quote': toggleLinePrefix(id); break;
+      case 'code':
+        if (sel.includes('\n') || !sel) insertBlock('```\n' + (sel || 'код') + '\n```', 4, (sel || 'код').length);
+        else wrapSelection('`', '`', 'код');
+        break;
+      case 'link': {
+        const a = ta.selectionStart;
+        if (/^https?:\/\/\S+$/.test(sel.trim())) replaceRange(a, ta.selectionEnd, `[ссылка](${sel.trim()})`, a + 1, a + 8);
+        else {
+          const label = sel || 'текст';
+          const text = `[${label}](https://)`;
+          replaceRange(a, ta.selectionEnd, text, a + label.length + 3, a + text.length - 1);
+        }
+        break;
+      }
+      case 'table': insertBlock('| Столбец 1 | Столбец 2 |\n| --- | --- |\n| | |', 2, 9); break;
+      case 'image': insertBlock('![описание](https://)', 13, 8); break;
+      case 'chart': insertBlock('```chart\n3, 7, 4, 9, 6\n```', 9, 13); break;
+    }
+  }
+
+  // Enter внутри списка продолжает его: «7.» → «8.», «- » → «- ».
+  // Enter на пустом пункте завершает список.
+  function onBodyKeydown(e) {
+    const ta = editor.bodyEl;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.shiftKey && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'b' || k === 'и') { e.preventDefault(); applyTool('bold'); return; }
+      if (k === 'i' || k === 'ш') { e.preventDefault(); applyTool('italic'); return; }
+      if (k === 'k' || k === 'л') { e.preventDefault(); e.stopPropagation(); applyTool('link'); return; }
+    }
+    if (e.key === 'Tab' && !mod) {
+      e.preventDefault();
+      const { selectionStart: a, selectionEnd: b } = ta;
+      if (a === b && !e.shiftKey) replaceRange(a, b, '  ');
+      return;
+    }
+    if (e.key !== 'Enter' || e.shiftKey || mod || e.isComposing) return;
+    const { selectionStart: a, selectionEnd: b, value: v } = ta;
+    if (a !== b) return;
+    const ls = v.lastIndexOf('\n', a - 1) + 1;
+    const line = v.slice(ls, a);
+    let m, next = null;
+    if ((m = line.match(/^(\s*)(\d+)\.\s+(.*)$/))) next = m[3].trim() ? `${m[1]}${+m[2] + 1}. ` : '';
+    else if ((m = line.match(/^(\s*)([-*])\s+\[[ xX]\]\s*(.*)$/))) next = m[3].trim() ? `${m[1]}${m[2]} [ ] ` : '';
+    else if ((m = line.match(/^(\s*)([-*])\s+(.*)$/))) next = m[3].trim() ? `${m[1]}${m[2]} ` : '';
+    else if ((m = line.match(/^(\s*)>\s?(.*)$/))) next = m[2].trim() ? `${m[1]}> ` : '';
+    if (next === null) return;
+    e.preventDefault();
+    if (next === '') replaceRange(ls, a, '');            // пустой пункт — выходим из списка
+    else replaceRange(a, a, '\n' + next);
+  }
+
+  function setPreview(on) {
+    editor.preview = !!on;
+    editor.bodyEl.hidden = editor.preview;
+    editor.previewEl.hidden = !editor.preview;
+    if (editor.preview) {
+      const html = renderBody(editor.bodyEl.value);
+      editor.previewEl.innerHTML = html || '<p class="muted">Пока пусто</p>';
+      editor.previewEl.classList.toggle('font-mono', editor.font === 'mono');
+    }
+    const tb = $('editorToolbar');
+    tb.classList.toggle('previewing', editor.preview);
+    const pb = tb.querySelector('[data-tool="preview"]');
+    if (pb) { pb.classList.toggle('active', editor.preview); pb.setAttribute('aria-pressed', String(editor.preview)); }
+    if (!editor.preview) requestAnimationFrame(autoGrow);
+  }
+
+  function setFont(v) {
+    editor.font = v === 'mono' ? 'mono' : 'sans';
+    editor.bodyEl.classList.toggle('font-mono', editor.font === 'mono');
+    editor.previewEl.classList.toggle('font-mono', editor.font === 'mono');
+    const b = document.querySelector('#editorToolbar [data-tool="font"]');
+    if (b) { b.classList.toggle('active', editor.font === 'mono'); b.setAttribute('aria-pressed', String(editor.font === 'mono')); }
+    requestAnimationFrame(autoGrow);
+  }
+
+  function setImportance(v) {
+    editor.importance = normImp(v);
+    document.querySelectorAll('#impSwitch button').forEach((b) => {
+      const on = b.dataset.imp === editor.importance;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-checked', String(on));
     });
-    scope.querySelectorAll('.item-row[data-id]').forEach((el) => {
-      if (el.dataset.bound) return;
-      el.dataset.bound = '1';
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.checkbox')) return;
-        const sw = el.closest('.swipe-item');
-        if (sw && sw.classList.contains('open')) { closeSwipe(sw); return; }
-        const it = state.items.find((x) => x.id === el.dataset.id);
-        if (it) openEditor(it, it.type);
-      });
+    $('impSwitch').dataset.value = editor.importance;
+  }
+
+  function setDone(v) {
+    editor.done = !!v;
+    const b = $('doneToggle');
+    b.classList.toggle('active', editor.done);
+    b.setAttribute('aria-pressed', String(editor.done));
+  }
+
+  function updateDeadlineLabel() {
+    const ts = fromLocalInput(editor.deadlineEl.value);
+    const label = $('deadlineLabel');
+    const pill = $('deadlinePill');
+    const rem = ts && !editor.done ? remaining(ts) : null;
+    label.textContent = ts ? fmtHuman(ts) : 'Дедлайн';
+    pill.classList.toggle('has-value', !!ts);
+    pill.dataset.kind = rem ? rem.kind : '';
+    $('deadlineClear').hidden = !ts;
+  }
+
+  function setEditorType(type) {
+    state.editingType = type === 'note' ? 'note' : 'task';
+    document.querySelectorAll('#editorTypeSwitch button').forEach((b) => b.classList.toggle('active', b.dataset.type === state.editingType));
+    moveIndicator($('editorTypeSwitch'));
+    $('taskMeta').hidden = state.editingType !== 'task';
+    editor.bodyEl.placeholder = state.editingType === 'task'
+      ? 'Детали задачи, подзадачи…'
+      : 'Просто пиши. Markdown работает: **жирный**, - список, ```код```';
+  }
+
+  function setSaveState(s) {
+    const el = $('saveState');
+    const text = { idle: '', pending: 'Изменено', saving: 'Сохранение…', saved: 'Сохранено', error: 'Нет связи — повторю' }[s] || '';
+    el.dataset.state = s;
+    el.innerHTML = text ? `<span class="ss-dot"></span><span>${text}</span>` : '';
+  }
+
+  function updateCharCount() {
+    const text = editor.bodyEl.value;
+    const words = (text.trim().match(/\S+/g) || []).length;
+    $('charCount').textContent = `${words} ${plural(words, 'слово', 'слова', 'слов')} · ${text.length} ${plural(text.length, 'символ', 'символа', 'символов')}`;
+  }
+
+  // Поле текста растёт вместе с содержимым: скролл один — у всей карточки.
+  function autoGrow() {
+    const ta = editor.bodyEl;
+    if (!ta || ta.hidden) return;
+    const sc = editor.scroll;
+    const top = sc.scrollTop;
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(ta.scrollHeight + 2, 180) + 'px';
+    sc.scrollTop = top;
+  }
+
+  function openEditor(item, type) {
+    if (editor.overlay.classList.contains('open')) flushSave();
+    clearTimeout(editor.timer);
+    editor.dirty = false;
+    state.editingId = item ? item.id : uid();
+    editor.isNew = !item;
+
+    const t = item || { title: '', body: '', importance: 'green', deadline: null, font: 'sans', done: false };
+    editor.titleEl.value = t.title || '';
+    editor.bodyEl.value = t.body || '';
+    editor.deadlineEl.value = toLocalInput(t.deadline);
+    setImportance(t.importance);
+    setDone(t.done);
+    setFont(t.font);
+    setPreview(false);
+
+    const ov = editor.overlay;
+    ov.classList.add('open');
+    ov.setAttribute('aria-hidden', 'false');
+    setEditorType(item ? item.type : type);
+    updateDeadlineLabel();
+    updateCharCount();
+    setSaveState(item ? 'saved' : 'idle');
+    editor.scroll.scrollTop = 0;
+
+    requestAnimationFrame(() => {
+      moveIndicator($('editorTypeSwitch'));
+      autoGrow();
+      if (!item) editor.titleEl.focus();
+    });
+  }
+
+  function readEditor() {
+    return {
+      id: state.editingId,
+      type: state.editingType,
+      title: editor.titleEl.value.trim(),
+      body: editor.bodyEl.value,
+      font: editor.font,
+      importance: editor.importance,
+      deadline: fromLocalInput(editor.deadlineEl.value),
+      done: editor.done,
+    };
+  }
+
+  function scheduleSave() {
+    if (!state.editingId) return;
+    editor.dirty = true;
+    setSaveState('pending');
+    clearTimeout(editor.timer);
+    editor.timer = setTimeout(flushSave, AUTOSAVE_DELAY);
+  }
+
+  // Сохраняет текущее состояние редактора. Вызовы выстраиваются в очередь,
+  // поэтому два сохранения никогда не идут параллельно.
+  function flushSave() {
+    clearTimeout(editor.timer);
+    if (!editor.dirty || !state.editingId) return editor.chain;
+    editor.dirty = false;
+    const snap = readEditor();
+    editor.chain = editor.chain.then(() => doSave(snap)).catch((e) => console.error('[autosave]', e));
+    return editor.chain;
+  }
+
+  async function doSave(snap) {
+    const existing = state.items.find((x) => x.id === snap.id);
+    if (!existing && !snap.title && !snap.body.trim()) {
+      if (state.editingId === snap.id) setSaveState('idle');
+      return;
+    }
+    const item = existing ? { ...existing } : { id: snap.id, createdAt: Date.now(), deleted: false, done: false };
+    item.type = snap.type;
+    item.title = snap.title;
+    item.body = snap.body;
+    item.font = snap.font;
+    if (snap.type === 'task') {
+      item.deadline = snap.deadline;
+      item.importance = snap.importance;
+      item.done = snap.done;
+    } else {
+      item.deadline = null;
+      delete item.importance;
+      item.done = false;
+    }
+
+    const isCurrent = () => state.editingId === snap.id;
+    if (isCurrent()) setSaveState('saving');
+    try {
+      await persist(item);
+      if (isCurrent()) setSaveState(editor.dirty ? 'pending' : 'saved');
+      if (window.Links) Links.ingestFromItem(item);
+    } catch (e) {
+      console.error('[save]', e);
+      if (isCurrent()) {
+        setSaveState('error');
+        editor.dirty = true;
+        clearTimeout(editor.timer);
+        editor.timer = setTimeout(flushSave, RETRY_DELAY);
+      }
+    }
+    render();
+  }
+
+  async function closeEditor() {
+    if (!editor.overlay.classList.contains('open')) return;
+    const id = state.editingId;
+    const p = flushSave();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    editor.overlay.classList.remove('open');
+    editor.overlay.setAttribute('aria-hidden', 'true');
+    await p;
+    if (state.editingId === id) state.editingId = null;
+    clearTimeout(editor.timer); // повтор после ошибки подхватит pendingSync
+    render();
+  }
+
+  async function deleteFromEditor() {
+    const id = state.editingId;
+    clearTimeout(editor.timer);
+    editor.dirty = false;
+    await editor.chain;
+    editor.overlay.classList.remove('open');
+    editor.overlay.setAttribute('aria-hidden', 'true');
+    state.editingId = null;
+    if (state.items.some((x) => x.id === id)) await deleteWithUndo(id);
+    else render();
+  }
+
+  function bindEditor() {
+    editor.overlay = $('editorOverlay');
+    editor.modal = $('editorModal');
+    editor.scroll = $('editorScroll');
+    editor.titleEl = $('editorTitle');
+    editor.bodyEl = $('editorBody');
+    editor.previewEl = $('editorPreview');
+    editor.deadlineEl = $('editorDeadline');
+
+    renderToolbar();
+
+    document.querySelectorAll('#editorTypeSwitch button').forEach((b) => {
+      b.addEventListener('click', () => { setEditorType(b.dataset.type); scheduleSave(); });
     });
 
-    bindSwipe(scope);
+    $('editorDone').addEventListener('click', closeEditor);
+    $('editorClose').addEventListener('click', closeEditor);
+    $('editorDelete').addEventListener('click', deleteFromEditor);
+    editor.overlay.addEventListener('mousedown', (e) => { if (e.target === editor.overlay) closeEditor(); });
+
+    document.querySelectorAll('#impSwitch button').forEach((b) => {
+      b.addEventListener('click', () => { setImportance(b.dataset.imp); scheduleSave(); });
+    });
+    $('doneToggle').addEventListener('click', () => { setDone(!editor.done); updateDeadlineLabel(); scheduleSave(); });
+    $('deadlineClear').addEventListener('click', () => { editor.deadlineEl.value = ''; updateDeadlineLabel(); scheduleSave(); });
+    ['input', 'change'].forEach((ev) => editor.deadlineEl.addEventListener(ev, () => { updateDeadlineLabel(); scheduleSave(); }));
+    // На десктопе клик по «пилюле» сразу открывает выбор даты.
+    $('deadlinePill').addEventListener('click', (e) => {
+      if (e.target === editor.deadlineEl) return;
+      try { editor.deadlineEl.showPicker(); } catch { editor.deadlineEl.focus(); }
+    });
+
+    editor.titleEl.addEventListener('input', scheduleSave);
+    editor.titleEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); editor.bodyEl.focus(); }
+    });
+    editor.bodyEl.addEventListener('input', () => { updateCharCount(); autoGrow(); scheduleSave(); });
+    editor.bodyEl.addEventListener('keydown', onBodyKeydown);
+    window.addEventListener('resize', () => { if (editor.overlay.classList.contains('open')) { autoGrow(); moveIndicator($('editorTypeSwitch')); } });
+
+    const tb = $('editorToolbar');
+    // mousedown не уводит фокус из textarea — выделение не теряется.
+    tb.addEventListener('mousedown', (e) => { if (e.target.closest('.tool')) e.preventDefault(); });
+    tb.addEventListener('click', (e) => {
+      const b = e.target.closest('.tool');
+      if (b) applyTool(b.dataset.tool);
+    });
+    editor.previewEl.addEventListener('dblclick', () => setPreview(false));
+
+    // Сохраняем при уходе со страницы / сворачивании приложения.
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+    window.addEventListener('beforeunload', (e) => {
+      if (editor.dirty || pendingSync.size) { flushSave(); e.preventDefault(); e.returnValue = ''; }
+    });
+  }
+
+  function addForCurrentMode() {
+    if (!Auth.isSignedIn()) { openAccountModal(); return; }
+    if (state.mode === 'links') {
+      const inp = $('linkAddInput');
+      if (inp) { inp.focus(); inp.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      return;
+    }
+    openEditor(null, state.mode === 'notes' ? 'note' : 'task');
+  }
+
+  /* ====================== ССЫЛКИ ====================== */
+
+  function hueOf(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+
+  function shortPath(url) {
+    try {
+      const u = new URL(url);
+      const p = (u.pathname === '/' ? '' : decodeURIComponent(u.pathname)) + (u.search || '');
+      return p.length > 48 ? p.slice(0, 47) + '…' : p;
+    } catch { return ''; }
+  }
+
+  function filteredLinks() {
+    const q = state.links.query.trim().toLowerCase();
+    const g = state.links.group;
+    return Links.links
+      .filter((l) => {
+        if (g === '__none' && l.group) return false;
+        if (g && g !== '__none' && l.group !== g) return false;
+        if (q && !(l.url + ' ' + (l.title || '') + ' ' + (l.domain || '')).toLowerCase().includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
+
+  function renderLinksView() {
+    const total = Links.links.length;
+    if (state.links.group && state.links.group !== '__none' && !Links.groups.some((g) => g.id === state.links.group)) state.links.group = '';
+    return `
+      ${viewHead('Ссылки', `${total} ${plural(total, 'ссылка', 'ссылки', 'ссылок')}`, '')}
+      <form class="link-add" id="linkAddForm" autocomplete="off">
+        <span class="link-add-ico">${svgIcon('link', 18)}</span>
+        <input id="linkAddInput" type="text" inputmode="url" placeholder="Вставь ссылку…" aria-label="Новая ссылка" enterkeyhint="done">
+        <button class="btn primary" type="submit">Добавить</button>
+      </form>
+      <div class="link-tools">
+        <div class="chips chips-scroll" id="linkGroups"></div>
+        <label class="mini-search">
+          ${svgIcon('search', 15)}
+          <input id="linkSearch" type="search" placeholder="Найти" value="${escapeHtml(state.links.query)}" aria-label="Поиск по ссылкам">
+        </label>
+      </div>
+      <div class="links-list" id="linksList"></div>`;
+  }
+
+  function renderLinkGroups() {
+    const box = $('linkGroups');
+    if (!box) return;
+    const links = Links.links;
+    const g = state.links.group;
+    const count = (id) => links.filter((l) => l.group === id).length;
+    const noGroup = links.filter((l) => !l.group).length;
+    const chips = [`<button class="chip ${!g ? 'active' : ''}" data-group="">Все <span class="chip-n">${links.length}</span></button>`];
+    Links.groups.forEach((gr) => chips.push(
+      `<button class="chip ${g === gr.id ? 'active' : ''}" data-group="${escapeHtml(gr.id)}">${svgIcon('folder', 13)}${escapeHtml(gr.name)} <span class="chip-n">${count(gr.id)}</span></button>`));
+    if (Links.groups.length && noGroup) chips.push(`<button class="chip ${g === '__none' ? 'active' : ''}" data-group="__none">Без группы <span class="chip-n">${noGroup}</span></button>`);
+    chips.push(`<button class="chip chip-add" id="groupAdd" title="Новая группа">${svgIcon('plus', 13, 2.2)}Группа</button>`);
+    if (g && g !== '__none') chips.push(`<button class="chip chip-ghost" id="groupEdit" title="Переименовать или удалить группу">${svgIcon('more', 15, 2.4)}</button>`);
+    box.innerHTML = chips.join('');
+
+    box.querySelectorAll('[data-group]').forEach((b) => b.addEventListener('click', () => {
+      state.links.group = b.dataset.group;
+      state.animateNext = true;
+      renderLinkGroups();
+      renderLinksList();
+    }));
+    $('groupAdd').addEventListener('click', async () => {
+      const name = await askText({ title: 'Новая группа', placeholder: 'Например, «Учёба»', actionText: 'Создать' });
+      if (!name) return;
+      const gr = Links.addGroup(name);
+      if (gr) { state.links.group = gr.id; renderLinkGroups(); renderLinksList(); }
+    });
+    const edit = $('groupEdit');
+    if (edit) edit.addEventListener('click', () => openGroupMenu(g));
+  }
+
+  async function openGroupMenu(id) {
+    const gr = Links.groups.find((x) => x.id === id);
+    if (!gr) return;
+    const res = await askText({ title: 'Группа', value: gr.name, actionText: 'Сохранить', extraText: 'Удалить группу' });
+    if (!res) return;
+    if (res.extra) {
+      const n = Links.links.filter((l) => l.group === id).length;
+      const ok = await askConfirm({
+        title: `Удалить группу «${gr.name}»?`,
+        message: n ? `Ссылки (${n}) останутся — просто без группы.` : '',
+        actionText: 'Удалить',
+      });
+      if (!ok) return;
+      Links.removeGroup(id);
+      state.links.group = '';
+    } else {
+      Links.renameGroup(id, res);
+    }
+    renderLinkGroups();
+    renderLinksList();
+  }
+
+  function renderLinksList() {
+    const list = $('linksList');
+    if (!list) return;
+    const links = filteredLinks();
+    const animate = state.animateNext;
+    state.animateNext = false;
+    list.classList.toggle('animate', animate);
+    if (!links.length) {
+      const empty = Links.links.length
+        ? '<div class="empty small">Ничего не найдено</div>'
+        : `<div class="empty">${svgIcon('link', 28, 1.5)}<div>Ссылок пока нет</div><small>Вставь ссылку выше — или просто упомяни её в заметке, она появится здесь сама</small></div>`;
+      list.innerHTML = empty;
+      return;
+    }
+    const groupName = (id) => (Links.groups.find((g) => g.id === id) || {}).name || '';
+    list.innerHTML = links.map((l, i) => {
+      const title = l.title || l.domain || l.url;
+      const sub = [l.title ? l.domain : '', shortPath(l.url)].filter(Boolean).join('');
+      const gname = !state.links.group && l.group ? groupName(l.group) : '';
+      return `
+        <div class="link-card" style="--i:${Math.min(i, 14)};--h:${hueOf(l.domain || l.url)}" data-link="${escapeHtml(l.id)}">
+          <a class="link-main" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">
+            <span class="link-avatar">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>
+            <span class="link-text">
+              <span class="link-title">${escapeHtml(title)}</span>
+              <span class="link-sub">${escapeHtml(sub || l.url)}${gname ? ` <span class="link-group">${svgIcon('folder', 11)}${escapeHtml(gname)}</span>` : ''}</span>
+            </span>
+          </a>
+          <div class="link-actions">
+            <button class="icon-btn sm" data-copy title="Копировать" aria-label="Копировать ссылку">${svgIcon('copy', 16)}</button>
+            <button class="icon-btn sm" data-edit title="Изменить" aria-label="Изменить ссылку">${svgIcon('more', 18, 2.4)}</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.link-card').forEach((card) => {
+      const id = card.dataset.link;
+      card.querySelector('[data-copy]').addEventListener('click', async () => {
+        const l = Links.links.find((x) => x.id === id);
+        if (!l) return;
+        try { await navigator.clipboard.writeText(l.url); toast('Ссылка скопирована', 'ok', 1800); }
+        catch { toast('Не удалось скопировать', 'err'); }
+      });
+      card.querySelector('[data-edit]').addEventListener('click', () => openLinkEditor(id));
+    });
+  }
+
+  function bindLinksView() {
+    renderLinkGroups();
+    renderLinksList();
+    $('linkAddForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inp = $('linkAddInput');
+      const raw = inp.value.trim();
+      if (!raw) { inp.focus(); return; }
+      const group = state.links.group && state.links.group !== '__none' ? state.links.group : '';
+      const link = Links.addLink(raw, { group });
+      if (!link) { toast('Это не похоже на ссылку', 'err'); inp.classList.add('shake'); setTimeout(() => inp.classList.remove('shake'), 400); return; }
+      inp.value = '';
+      state.animateNext = true;
+      renderLinkGroups();
+      renderLinksList();
+      updateLinksSub();
+    });
+    $('linkAddInput').addEventListener('paste', () => {
+      // Вставили ссылку — сразу добавляем, без лишнего нажатия.
+      setTimeout(() => {
+        const v = $('linkAddInput').value.trim();
+        if (/^https?:\/\/\S+$/.test(v)) $('linkAddForm').requestSubmit();
+      }, 0);
+    });
+    $('linkSearch').addEventListener('input', (e) => { state.links.query = e.target.value; renderLinksList(); });
+  }
+
+  function updateLinksSub() {
+    const sub = document.querySelector('#viewRoot .view-sub');
+    const n = Links.links.length;
+    if (sub && state.mode === 'links') sub.textContent = `${n} ${plural(n, 'ссылка', 'ссылки', 'ссылок')}`;
+  }
+
+  function openLinkEditor(id) {
+    const l = Links.links.find((x) => x.id === id);
+    if (!l) return;
+    const body = $('linkBody');
+    const groups = Links.groups;
+    body.innerHTML = `
+      <div class="link-preview" style="--h:${hueOf(l.domain || l.url)}">
+        <span class="link-avatar lg">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>
+        <div class="link-text">
+          <span class="link-title">${escapeHtml(l.domain)}</span>
+          <a class="link-sub" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.url)}</a>
+        </div>
+      </div>
+      <label class="field">
+        <span class="field-label">Название</span>
+        <input class="input" id="linkTitleInput" type="text" value="${escapeHtml(l.title || '')}" placeholder="${escapeHtml(l.domain)}" autocomplete="off">
+      </label>
+      <div class="field">
+        <span class="field-label">Группа</span>
+        <div class="chips wrap" id="linkGroupPick">
+          <button class="chip ${!l.group ? 'active' : ''}" data-pick="">Без группы</button>
+          ${groups.map((g) => `<button class="chip ${l.group === g.id ? 'active' : ''}" data-pick="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`).join('')}
+          <button class="chip chip-add" id="linkGroupNew">${svgIcon('plus', 13, 2.2)}Новая</button>
+        </div>
+      </div>
+      <div class="link-edit-actions">
+        <a class="btn" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${svgIcon('external', 15)}Открыть</a>
+        <button class="btn ghost" id="linkBlock" title="Новые ссылки с этого сайта не будут собираться из заметок">${svgIcon('ban', 15)}Не собирать ${escapeHtml(l.domain)}</button>
+        <button class="btn ghost danger" id="linkDelete">${svgIcon('trash', 15)}Удалить</button>
+      </div>`;
+
+    openOverlay('linkOverlay');
+
+    const titleInput = $('linkTitleInput');
+    titleInput.addEventListener('input', () => { Links.updateLink(id, { title: titleInput.value.trim() }); });
+    titleInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') closeOverlay('linkOverlay'); });
+    body.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+      Links.updateLink(id, { group: b.dataset.pick });
+      body.querySelectorAll('[data-pick]').forEach((x) => x.classList.toggle('active', x === b));
+    }));
+    $('linkGroupNew').addEventListener('click', async () => {
+      const name = await askText({ title: 'Новая группа', placeholder: 'Название', actionText: 'Создать' });
+      if (!name) return;
+      const gr = Links.addGroup(name);
+      if (gr) { Links.updateLink(id, { group: gr.id }); openLinkEditor(id); }
+    });
+    $('linkBlock').addEventListener('click', () => {
+      Links.addBlock(l.domain);
+      toast(`Ссылки с ${l.domain} больше не собираются автоматически`, 'info', 3200);
+      $('linkBlock').disabled = true;
+    });
+    $('linkDelete').addEventListener('click', () => {
+      const removed = Links.removeLink(id);
+      closeOverlay('linkOverlay');
+      toast('Ссылка удалена', 'info', 5000, { label: 'Отменить', onClick: () => Links.restoreLink(removed) });
+    });
+  }
+
+  /* ====================== ОВЕРЛЕИ ====================== */
+
+  function openOverlay(id) {
+    const o = $(id);
+    o.classList.add('open');
+    o.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeOverlay(id) {
+    const o = $(id);
+    if (!o || !o.classList.contains('open')) return;
+    o.classList.remove('open');
+    o.setAttribute('aria-hidden', 'true');
+    if (id === 'linkOverlay' && state.mode === 'links') { renderLinkGroups(); renderLinksList(); }
+  }
+
+  function bindOverlays() {
+    document.querySelectorAll('.modal-overlay').forEach((o) => {
+      if (o.id === 'editorOverlay') return;
+      o.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closeOverlay(o.id)));
+      o.addEventListener('mousedown', (e) => { if (e.target === o) closeOverlay(o.id); });
+    });
+  }
+
+  function topOverlay() {
+    const open = [...document.querySelectorAll('.modal-overlay.open')];
+    return open[open.length - 1] || null;
+  }
+
+  /* ====================== НАСТРОЙКИ ====================== */
+
+  function openSettings() {
+    renderSettings();
+    openOverlay('settingsOverlay');
+  }
+
+  function renderSettings() {
+    const body = $('settingsBody');
+    const trashCount = state.items.filter(isDeleted).length;
+    const block = Links.blocklist;
+    body.innerHTML = `
+      <section class="set-section">
+        <h3>Оформление</h3>
+        <div class="set-row">
+          <span class="set-label">Тема</span>
+          <div class="seg seg-sm" id="themeSeg">
+            <span class="seg-indicator" aria-hidden="true"></span>
+            <button type="button" data-theme-pref="dark" class="${state.themePref === 'dark' ? 'active' : ''}">Тёмная</button>
+            <button type="button" data-theme-pref="light" class="${state.themePref === 'light' ? 'active' : ''}">Светлая</button>
+            <button type="button" data-theme-pref="system" class="${state.themePref === 'system' ? 'active' : ''}">Авто</button>
+          </div>
+        </div>
+        <div class="set-row">
+          <span class="set-label">Акцент</span>
+          <div class="swatches" role="radiogroup" aria-label="Акцентный цвет">
+            ${ACCENTS.map((a) => `<button type="button" class="swatch sw-${a.id} ${state.accent === a.id ? 'active' : ''}" data-accent="${a.id}" title="${a.label}" aria-label="${a.label}" role="radio" aria-checked="${state.accent === a.id}"></button>`).join('')}
+          </div>
+        </div>
+      </section>
+
+      <section class="set-section">
+        <h3>Ссылки</h3>
+        <label class="set-row switch-row">
+          <span><span class="set-label">Собирать ссылки из записей</span><small>Ссылки из текста задач и заметок сами попадают в раздел «Ссылки»</small></span>
+          <input type="checkbox" class="switch" id="autoCollect" ${Links.isAutoCollect() ? 'checked' : ''}>
+        </label>
+        ${block.length ? `
+          <div class="set-sub">Не собирать с этих сайтов</div>
+          <div class="chips wrap">${block.map((b) => `<span class="chip static">${escapeHtml(b.value)}<button type="button" class="chip-x" data-unblock="${escapeHtml(b.value)}" aria-label="Убрать">${svgIcon('close', 12, 2.4)}</button></span>`).join('')}</div>
+        ` : ''}
+      </section>
+
+      <section class="set-section">
+        <h3>Данные</h3>
+        <div class="nav-grid">
+          <button class="nav-card" id="navMetrics">${svgIcon('metrics', 18)}<span>Аналитика</span></button>
+          <button class="nav-card" id="navTrash">${svgIcon('trash', 18)}<span>Корзина</span>${trashCount ? `<span class="badge">${trashCount}</span>` : ''}</button>
+        </div>
+      </section>
+
+      <section class="set-section keys-section">
+        <h3>Горячие клавиши</h3>
+        <div class="keys">
+          <div><kbd>Ctrl</kbd><kbd>K</kbd><span>команды и поиск</span></div>
+          <div><kbd>Ctrl</kbd><kbd>N</kbd><span>новая запись</span></div>
+          <div><kbd>/</kbd><span>поиск</span></div>
+          <div><kbd>Esc</kbd><span>закрыть (всё сохранится)</span></div>
+        </div>
+      </section>`;
+
+    requestAnimationFrame(() => moveIndicator($('themeSeg')));
+    body.querySelectorAll('[data-theme-pref]').forEach((b) => b.addEventListener('click', () => {
+      state.themePref = b.dataset.themePref;
+      body.querySelectorAll('[data-theme-pref]').forEach((x) => x.classList.toggle('active', x === b));
+      moveIndicator($('themeSeg'));
+      applyTheme();
+    }));
+    body.querySelectorAll('[data-accent]').forEach((b) => b.addEventListener('click', () => {
+      state.accent = b.dataset.accent;
+      body.querySelectorAll('[data-accent]').forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', String(on)); });
+      applyTheme();
+    }));
+    $('autoCollect').addEventListener('change', (e) => Links.setAutoCollect(e.target.checked));
+    body.querySelectorAll('[data-unblock]').forEach((b) => b.addEventListener('click', () => { Links.removeBlock(b.dataset.unblock); renderSettings(); }));
+    $('navMetrics').addEventListener('click', () => { closeOverlay('settingsOverlay'); openMetrics(); });
+    $('navTrash').addEventListener('click', () => { closeOverlay('settingsOverlay'); openTrash(); });
   }
 
   /* ====================== АНАЛИТИКА ====================== */
 
   function openMetrics() {
-    const overlay = document.getElementById('metricsOverlay');
-    overlay.classList.add('open');
-    overlay.setAttribute('aria-hidden', 'false');
     renderMetrics();
-    if (window.gsap) {
-      gsap.fromTo('#metricsBody .metric, #metricsBody .metrics-section',
-          { opacity: 0, y: 8 },
-          { opacity: 1, y: 0, duration: .35, stagger: .04, ease: 'power2.out', clearProps: 'all' });
-    }
-  }
-  function closeMetrics() {
-    const o = document.getElementById('metricsOverlay');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
+    openOverlay('metricsOverlay');
   }
 
   function renderMetrics() {
-    const body = document.getElementById('metricsBody');
-    const tasks = state.items.filter((x) => x.type === 'task' && !hidden(x));
-    const notes = state.items.filter((x) => x.type === 'note' && !hidden(x));
+    const tasks = state.items.filter((x) => x.type === 'task' && visible(x));
+    const notes = state.items.filter((x) => x.type === 'note' && visible(x));
     const total = tasks.length;
     const done = tasks.filter((x) => x.done).length;
     const active = total - done;
     const overdue = tasks.filter((x) => !x.done && x.deadline && x.deadline < Date.now()).length;
-    const pct = total ? Math.round((done/total)*100) : 0;
-    const linksCount = window.Links ? Links.links.length : 0;
+    const pct = total ? Math.round((done / total) * 100) : 0;
 
     const DAYS = 14;
     const today0 = startOfDay();
-    const buckets = Array.from({ length: DAYS }, (_, i) => ({ ts: today0 - (DAYS-1-i)*86400000, count: 0 }));
+    const buckets = Array.from({ length: DAYS }, (_, i) => ({ ts: today0 - (DAYS - 1 - i) * 86400000, count: 0 }));
     tasks.forEach((t) => {
-      const day = startOfDay(t.createdAt || 0);
-      const idx = Math.round((day - buckets[0].ts) / 86400000);
+      const idx = Math.round((startOfDay(t.createdAt || 0) - buckets[0].ts) / 86400000);
       if (idx >= 0 && idx < DAYS) buckets[idx].count++;
     });
 
-    const imp = { red: 0, yellow: 0, green: 0 };
-    tasks.forEach((t) => { imp[t.importance || 'green']++; });
-
-    const catMap = {};
-    tasks.forEach((t) => { if (t.category) catMap[t.category] = (catMap[t.category]||0) + 1; });
-    const cats = Object.entries(catMap).sort((a,b) => b[1]-a[1]).slice(0, 6);
-    const catsMax = cats.length ? cats[0][1] : 1;
-
-    const weekday = [0,0,0,0,0,0,0];
+    const red = tasks.filter((t) => t.importance === 'red').length;
+    const weekday = [0, 0, 0, 0, 0, 0, 0];
     tasks.forEach((t) => { if (t.deadline) weekday[new Date(t.deadline).getDay()]++; });
+    const shortDate = (ts) => { const d = new Date(ts); return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}`; };
 
-    body.innerHTML = `
+    $('metricsBody').innerHTML = `
       <div class="metrics-grid">
-        <div class="metric"><div class="k">${svgIcon('total', 13)} Задач</div><div class="v">${total}</div><div class="s">всего</div></div>
-        <div class="metric"><div class="k">${svgIcon('bolt', 13)} Активных</div><div class="v">${active}</div><div class="s">${total ? Math.round((active/total)*100) : 0}% от всех</div></div>
-        <div class="metric"><div class="k">${svgIcon('clock', 13)} Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div><div class="s">нужно внимание</div></div>
-        <div class="metric"><div class="k">${svgIcon('target', 13)} Готовность</div><div class="v ok">${pct}%</div><div class="s">выполнено</div></div>
+        <div class="metric"><div class="k">Задач</div><div class="v">${total}</div><div class="s">${active} в работе</div></div>
+        <div class="metric"><div class="k">Выполнено</div><div class="v ok">${pct}%</div><div class="s">${done} ${plural(done, 'задача', 'задачи', 'задач')}</div></div>
+        <div class="metric"><div class="k">Просрочено</div><div class="v ${overdue ? 'err' : ''}">${overdue}</div><div class="s">нужно внимание</div></div>
+        <div class="metric"><div class="k">Заметок</div><div class="v">${notes.length}</div><div class="s">${Links.links.length} ${plural(Links.links.length, 'ссылка', 'ссылки', 'ссылок')}</div></div>
       </div>
-
-      <div class="metrics-grid" style="grid-template-columns:repeat(3,1fr)">
-        <div class="metric"><div class="k">${svgIcon('note', 13)} Заметок</div><div class="v">${notes.length}</div></div>
-        <div class="metric"><div class="k">${svgIcon('link', 13)} Ссылок</div><div class="v">${linksCount}</div></div>
-        <div class="metric"><div class="k">${svgIcon('clock', 13)} Выполнено</div><div class="v">${done}</div></div>
-      </div>
-
       <div class="metrics-section">
-        <div class="metrics-section-head">Активность · 14 дней</div>
-        <div class="metrics-chart-card">
-          ${svgBarChart(buckets.map((b, i) => ({ value: b.count, label: i % 2 === 0 ? shortDate(b.ts) : '' })))}
-        </div>
+        <div class="metrics-head">Новые задачи · 14 дней</div>
+        <div class="chart-card">${svgBarChart(buckets.map((b, i) => ({ value: b.count, label: i % 2 === 0 ? shortDate(b.ts) : '' })))}</div>
       </div>
-
-      <div class="metrics-section">
-        <div class="metrics-section-head">По дедлайнам · дни недели</div>
-        <div class="metrics-chart-card">
-          ${svgBarChart(['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map((label,i)=>({value:weekday[(i+1)%7],label})), { height: 150 })}
+      <div class="metrics-two">
+        <div class="metrics-section">
+          <div class="metrics-head">По важности</div>
+          <div class="chart-card">${svgDonut([
+            { value: red, color: 'var(--red)', label: 'Важные' },
+            { value: total - red, color: 'var(--green)', label: 'Обычные' },
+          ])}</div>
         </div>
-      </div>
-
-      <div class="metrics-two-col metrics-section">
-        <div>
-          <div class="metrics-section-head">По важности</div>
-          ${svgDonut([
-      { value: imp.red, color: 'var(--err)', label: 'Важно' },
-      { value: imp.yellow, color: 'var(--warn)', label: 'Средне' },
-      { value: imp.green, color: 'var(--ok)', label: 'Не срочно' },
-    ])}
+        <div class="metrics-section">
+          <div class="metrics-head">Дедлайны по дням недели</div>
+          <div class="chart-card">${svgBarChart(['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((label, i) => ({ value: weekday[(i + 1) % 7], label })), { height: 170, width: 420 })}</div>
         </div>
-        <div>
-          <div class="metrics-section-head">По категориям</div>
-          <div class="metrics-chart-card">
-            ${cats.length ? `
-              <div class="cat-list">
-                ${cats.map(([name, count]) => `
-                  <div class="cat-row">
-                    <span class="name">${escapeHtml(name)}</span>
-                    <div class="track"><div class="fill" style="width:${(count/catsMax)*100}%"></div></div>
-                    <span class="num">${count}</span>
-                  </div>
-                `).join('')}
-              </div>
-            ` : '<div class="empty-state" style="padding:24px 8px;border:none;background:transparent">Нет категорий</div>'}
-          </div>
-        </div>
-      </div>
-    `;
+      </div>`;
   }
 
-  const shortDate = (ts) => { const d = new Date(ts); return `${pad2(d.getDate())}.${pad2(d.getMonth()+1)}`; };
-
   function svgBarChart(data, opts = {}) {
-    if (!data.length) return '<div class="empty-state">Нет данных</div>';
-    const W = 760, H = opts.height || 160, padX = 12, padTop = 12, padBot = 22;
+    const W = opts.width || 760, H = opts.height || 160, padX = 8, padTop = 16, padBot = 22;
     const max = Math.max(...data.map((d) => d.value), 1);
-    const stepX = (W - padX*2) / data.length;
-    const barW = Math.max(4, stepX - 6);
+    const stepX = (W - padX * 2) / data.length;
+    const barW = Math.max(4, stepX * 0.62);
     let out = '';
     data.forEach((d, i) => {
-      const h = (d.value/max) * (H - padTop - padBot);
-      const x = padX + i*stepX + (stepX-barW)/2;
+      const h = (d.value / max) * (H - padTop - padBot);
+      const x = padX + i * stepX + (stepX - barW) / 2;
       const y = H - padBot - h;
-      out += `<rect class="chart-bar ${d.value===0?'dim':''}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(h,1).toFixed(1)}" rx="2"/>`;
-      if (d.value) out += `<text class="chart-value" x="${(x+barW/2).toFixed(1)}" y="${(y-5).toFixed(1)}" text-anchor="middle">${d.value}</text>`;
-      if (d.label) out += `<text class="chart-label" x="${(x+barW/2).toFixed(1)}" y="${H-6}" text-anchor="middle">${d.label}</text>`;
+      out += `<rect class="chart-bar ${d.value === 0 ? 'dim' : ''}" style="--i:${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(h, 2).toFixed(1)}" rx="4"/>`;
+      if (d.value) out += `<text class="chart-value" x="${(x + barW / 2).toFixed(1)}" y="${(y - 5).toFixed(1)}" text-anchor="middle">${d.value}</text>`;
+      if (d.label) out += `<text class="chart-label" x="${(x + barW / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${d.label}</text>`;
     });
-    out += `<line class="chart-axis" x1="${padX}" y1="${H-padBot}" x2="${W-padX}" y2="${H-padBot}"/>`;
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${out}</svg>`;
   }
 
-  function svgRing(pct) {
-    const R = 26, C = 2 * Math.PI * R;
-    const off = C * (1 - Math.max(0, Math.min(100, pct)) / 100);
-    return `
-      <div class="ring-wrap">
-        <svg width="62" height="62" viewBox="0 0 62 62">
-          <circle cx="31" cy="31" r="${R}" fill="none" stroke="var(--surface-3)" stroke-width="6"/>
-          <circle cx="31" cy="31" r="${R}" fill="none" stroke="var(--ok)" stroke-width="6" stroke-linecap="round"
-            stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 31 31)"/>
-        </svg>
-        <span class="ring-val">${pct}%</span>
-      </div>
-    `;
-  }
-
   function svgDonut(segments) {
-    const total = segments.reduce((s,x) => s + x.value, 0);
-    const size = 140, R = 58, r = 40, cx = size/2, cy = size/2;
-    if (!total) {
-      return `
-        <div class="donut-wrap">
-          <svg class="donut-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-            <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="var(--surface-3)" stroke-width="${R-r}"/>
-            <text class="donut-total" x="${cx}" y="${cy}" dy="8" text-anchor="middle">0</text>
-          </svg>
-          <div class="donut-legend">
-            ${segments.map(s => `<div class="donut-legend-row"><span class="donut-swatch" style="background:${s.color}"></span><span class="donut-legend-label">${s.label}</span><span class="donut-legend-value">0</span></div>`).join('')}
-          </div>
-        </div>
-      `;
-    }
-    const C = 2*Math.PI*((R+r)/2);
+    const total = segments.reduce((s, x) => s + x.value, 0);
+    const size = 132, R = 54, r = 38, cx = size / 2, cy = size / 2, mid = (R + r) / 2;
+    const C = 2 * Math.PI * mid;
     let offset = 0, arcs = '';
-    segments.forEach((s) => {
+    if (total) segments.forEach((s) => {
       if (!s.value) return;
-      const len = (s.value/total)*C;
-      arcs += `<circle cx="${cx}" cy="${cy}" r="${(R+r)/2}" fill="none" stroke="${s.color}" stroke-width="${R-r}" stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
+      const len = (s.value / total) * C;
+      arcs += `<circle class="donut-arc" cx="${cx}" cy="${cy}" r="${mid}" fill="none" stroke="${s.color}" stroke-width="${R - r}" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
       offset += len;
     });
     return `
       <div class="donut-wrap">
-        <svg class="donut-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-          <circle cx="${cx}" cy="${cy}" r="${(R+r)/2}" fill="none" stroke="var(--surface-3)" stroke-width="${R-r}"/>
+        <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+          <circle cx="${cx}" cy="${cy}" r="${mid}" fill="none" stroke="var(--surface-3)" stroke-width="${R - r}"/>
           ${arcs}
           <text class="donut-total" x="${cx}" y="${cy}" dy="8" text-anchor="middle">${total}</text>
         </svg>
         <div class="donut-legend">
-          ${segments.map(s => `
-            <div class="donut-legend-row">
-              <span class="donut-swatch" style="background:${s.color}"></span>
-              <span class="donut-legend-label">${s.label}</span>
-              <span class="donut-legend-value">${s.value} · ${Math.round((s.value/total)*100)}%</span>
-            </div>
-          `).join('')}
+          ${segments.map((s) => `<div class="legend-row"><span class="swatch-dot" style="background:${s.color}"></span><span>${s.label}</span><b>${s.value}${total ? ` · ${Math.round((s.value / total) * 100)}%` : ''}</b></div>`).join('')}
         </div>
-      </div>
-    `;
-  }
-
-  /* ====================== ЗАПИСЬ: ПРОСМОТР И ПРАВКА ======================
-     Тап по записи открывает РАЗВЁРНУТЫЙ ПРОСМОТР (режим 'view'): весь текст,
-     параметры, дедлайн. Оттуда можно отметить выполненной, удалить или нажать
-     «Изменить» — тогда та же карточка переходит в режим правки ('edit').
-     ИИ вызывается ТОЛЬКО явно — через кнопку «Изменить через ИИ» в тулбаре
-     редактора (см. runAiEdit). Никаких автоматических правок при сохранении. */
-
-  const editor = {
-    overlay: null, modal: null, viewEl: null,
-    titleEl: null, categoryEl: null, tagsEl: null,
-    deadlineEl: null, importanceEl: null, fontEl: null,
-    bodyEl: null, previewEl: null,
-    mode: 'edit',        // 'view' | 'edit'
-  };
-  let autosaveTimer = null;
-
-  const IMP_LABEL = { green: 'Не срочно', yellow: 'Средне', red: 'Важно' };
-  const parseTags = (v) => String(v || '').split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  function setEditorMode(mode) {
-    editor.mode = mode;
-    editor.modal.dataset.mode = mode;
-    const body = editor.modal.querySelector('.modal-body');
-    if (body) body.scrollTop = 0;
-  }
-
-  function setImportance(v) {
-    editor.importanceEl.value = v;
-    document.querySelectorAll('#importanceSeg .seg-opt').forEach((b) => {
-      const on = b.dataset.imp === v;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-checked', String(on));
-    });
-  }
-
-  function setFont(v) {
-    v = v === 'mono' ? 'mono' : 'sans';
-    editor.fontEl.value = v;
-    editor.bodyEl.classList.toggle('font-mono', v === 'mono');
-    document.querySelectorAll('#fontSeg .seg-opt').forEach((b) => {
-      const on = b.dataset.font === v;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-checked', String(on));
-    });
-  }
-
-  function openEditor(item, type) {
-    state.editingId = item ? item.id : uid();
-    state.editingType = item ? item.type : type;
-
-    const t = item || {
-      title: '', body: '', category: '', tags: [],
-      importance: 'green', deadline: null, font: 'sans', done: false,
-    };
-    editor.titleEl.value = t.title || '';
-    editor.categoryEl.value = t.category || '';
-    editor.tagsEl.value = (t.tags || []).join(', ');
-    editor.deadlineEl.value = toLocalInput(t.deadline);
-    editor.bodyEl.value = t.body || '';
-    setImportance(t.importance || 'green');
-    setFont(t.font);
-    renderCategoryDatalist();
-    setEditorType(state.editingType);
-
-    editor.overlay.classList.add('open');
-    editor.overlay.setAttribute('aria-hidden', 'false');
-
-    if (item && !item.draft) { renderView(item); setEditorMode('view'); }
-    else enterEditMode('title');
-  }
-
-  function enterEditMode(focus) {
-    setEditorMode('edit');
-    document.getElementById('editorParams').open = false;
-    updateParamsSummary();
-    updateCharCount();
-    requestAnimationFrame(() => {
-      autoGrow();
-      if (focus === 'title') (editor.titleEl.value ? editor.bodyEl : editor.titleEl).focus();
-      else if (focus === 'body') {
-        editor.bodyEl.focus();
-        const n = editor.bodyEl.value.length;
-        editor.bodyEl.setSelectionRange(n, n);
-      }
-    });
-  }
-
-  function closeEditor() {
-    clearTimeout(autosaveTimer);
-    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    editor.overlay.classList.remove('open');
-    editor.overlay.setAttribute('aria-hidden', 'true');
-    state.editingId = null;
-  }
-
-  function setEditorType(type) {
-    state.editingType = type;
-    document.querySelectorAll('#editorTypeSwitch button').forEach((b) => b.classList.toggle('active', b.dataset.type === type));
-    document.querySelectorAll('#editorModal [data-task-only]').forEach((el) => { el.style.display = type === 'task' ? '' : 'none'; });
-    updateParamsSummary();
-  }
-
-  function renderCategoryDatalist() {
-    const dl = document.getElementById('categoryList');
-    const cats = new Set();
-    state.items.forEach((it) => { if (it.category && !hidden(it)) cats.add(it.category); });
-    dl.innerHTML = [...cats].map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
-  }
-
-  function updateParamsSummary() {
-    const el = document.getElementById('paramsSummary');
-    if (!el) return;
-    const parts = [];
-    if (state.editingType === 'task') parts.push(IMP_LABEL[editor.importanceEl.value] || '');
-    const cat = editor.categoryEl.value.trim();
-    if (cat) parts.push(cat);
-    const n = parseTags(editor.tagsEl.value).length;
-    if (n) parts.push(`${n} ${n === 1 ? 'тег' : n < 5 ? 'тега' : 'тегов'}`);
-    el.textContent = parts.filter(Boolean).join(' · ');
-  }
-
-  function updateCharCount() {
-    const el = document.getElementById('charCount');
-    if (!el || !editor.bodyEl) return;
-    const text = (editor.titleEl.value + '\n' + editor.bodyEl.value);
-    const words = (text.trim().match(/\S+/g) || []).length;
-    el.textContent = `${words} сл. · ${text.length} симв.`;
-  }
-
-  // Поле текста растёт вместе с содержимым: внутри окна остаётся ровно один
-  // скролл (у самой карточки), без вложенной прокрутки у textarea.
-  function autoGrow() {
-    const ta = editor.bodyEl;
-    if (!ta || editor.mode !== 'edit') return;
-    const sc = ta.closest('.modal-body');
-    const top = sc ? sc.scrollTop : 0;
-    ta.style.height = 'auto';
-    ta.style.height = Math.max(ta.scrollHeight + 2, 160) + 'px';
-    if (sc) sc.scrollTop = top;
-  }
-
-  function onBodyChanged() { updateCharCount(); autoGrow(); }
-
-  function insertAtCursor(text) {
-    const ta = editor.bodyEl;
-    const a = ta.selectionStart, b = ta.selectionEnd;
-    ta.value = ta.value.slice(0, a) + text + ta.value.slice(b);
-    ta.selectionStart = ta.selectionEnd = a + text.length;
-    ta.focus();
-    onBodyChanged();
-    scheduleAutosave();
-  }
-
-  function wrapSelection(before, after, placeholder) {
-    const ta = editor.bodyEl;
-    const a = ta.selectionStart, b = ta.selectionEnd;
-    const inner = ta.value.slice(a, b) || placeholder;
-    ta.value = ta.value.slice(0, a) + before + inner + after + ta.value.slice(b);
-    ta.selectionStart = a + before.length;
-    ta.selectionEnd = a + before.length + inner.length;
-    ta.focus();
-    onBodyChanged();
-    scheduleAutosave();
-  }
-
-  /* ---------- Развёрнутый просмотр ---------- */
-
-  function renderView(it) {
-    document.getElementById('editorTypeBadge').textContent = it.type === 'task' ? 'Задача' : 'Заметка';
-    const isTask = it.type === 'task';
-    const rem = isTask && !it.done ? remaining(it.deadline) : null;
-
-    const chips = [];
-    if (isTask) chips.push(`<span class="view-chip imp-${it.importance || 'green'}"><span class="dot"></span>${IMP_LABEL[it.importance || 'green']}</span>`);
-    if (it.category) chips.push(`<span class="view-chip">${escapeHtml(it.category)}</span>`);
-    (it.tags || []).forEach((t) => chips.push(`<span class="view-chip tag">#${escapeHtml(t)}</span>`));
-
-    const deadline = isTask && it.deadline
-        ? `<div class="view-deadline ${rem ? rem.kind : ''}">${svgIcon('clock', 15)}<span>${escapeHtml(fmtTime(it.deadline))}${rem ? ' · ' + escapeHtml(rem.text) : ''}</span></div>`
-        : '';
-    // Если текст начинается с «# Заголовок», повторяющего название записи — не показываем дубль.
-    let text = it.body || '';
-    const h1 = text.match(/^\s*#\s+(.+?)\s*(?:\n|$)/);
-    if (h1 && h1[1].trim().toLowerCase() === (it.title || '').trim().toLowerCase()) text = text.slice(h1[0].length);
-    const body = text.trim()
-        ? `<div class="md view-body ${it.font === 'mono' ? 'font-mono' : ''}">${renderBody(text)}</div>`
-        : '<p class="view-empty">Текста нет. Нажми «Изменить», чтобы добавить.</p>';
-    const doneBtn = isTask
-        ? `<button type="button" class="btn view-done ${it.done ? 'is-done' : ''}" id="viewDoneBtn">${it.done ? 'Вернуть в работу' : 'Отметить выполненной'}</button>`
-        : '';
-
-    editor.viewEl.innerHTML = `
-      <h2 class="view-heading ${it.done ? 'done' : ''}">${escapeHtml(it.title || '(без названия)')}</h2>
-      ${deadline}
-      ${chips.length ? `<div class="view-meta">${chips.join('')}</div>` : ''}
-      ${body}
-      ${doneBtn}
-      <div class="view-stamp">Изменено ${escapeHtml(fmtTime(it.updatedAt))}</div>
-    `;
-
-    const btn = editor.viewEl.querySelector('#viewDoneBtn');
-    if (btn) btn.addEventListener('click', () => {
-      const cur = state.items.find((x) => x.id === state.editingId);
-      if (!cur) return;
-      cur.done = !cur.done;
-      renderView(cur);
-      render();
-      persist(cur).catch((err) => console.error('[toggle]', err));
-    });
-  }
-
-  /* ---------- Сохранение ---------- */
-
-  function readEditorInto(item) {
-    item.type = state.editingType;
-    item.title = editor.titleEl.value.trim();
-    item.body = editor.bodyEl.value;
-    item.category = editor.categoryEl.value.trim();
-    item.tags = parseTags(editor.tagsEl.value);
-    item.font = editor.fontEl.value === 'mono' ? 'mono' : 'sans';
-    if (item.type === 'task') {
-      item.deadline = fromLocalInput(editor.deadlineEl.value);
-      item.importance = editor.importanceEl.value;
-    } else {
-      delete item.deadline;
-      delete item.importance;
-      item.done = false;
-    }
-    return item;
-  }
-
-  // saveLock не даёт двум сохранениям идти параллельно. Автосейв при занятом
-  // замке просто пропускается, а явное «Сохранить» ЖДЁТ его завершения.
-  let saveLock = false;
-
-  async function persistFromEditor(isAutosave) {
-    if (saveLock) {
-      if (isAutosave) return;
-      for (let i = 0; i < 100 && saveLock; i++) await sleep(50);
-    }
-    const title = editor.titleEl.value.trim();
-    const body = editor.bodyEl.value;
-    if (!title && !body) return; // пустой черновик не сохраняем
-
-    saveLock = true;
-    try {
-      const existing = state.items.find((x) => x.id === state.editingId);
-      const item = existing ? { ...existing } : {
-        id: state.editingId, type: state.editingType, done: false,
-        createdAt: Date.now(), deleted: false, draft: true,
-      };
-      readEditorInto(item);
-      // Автосейв помечает новую запись как черновик (скрыта из списков и
-      // аналитики). Явное «Сохранить» снимает флаг.
-      item.draft = isAutosave ? (item.draft !== false) : false;
-      await persist(item);
-      if (!isAutosave && window.Links) Links.ingestFromItem(item);
-    } finally {
-      saveLock = false;
-    }
-  }
-
-  function scheduleAutosave() {
-    if (editor.mode !== 'edit') return;
-    clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(() => persistFromEditor(true), 1500);
-  }
-
-  // Сохранение мгновенное: без ИИ, без ожиданий. Просто закрываем окно,
-  // перерисовываем список и показываем тост.
-  async function saveEditor() {
-    clearTimeout(autosaveTimer);
-    const saveBtn = document.getElementById('editorSave');
-    if (saveBtn && saveBtn.disabled) return;
-    if (saveBtn) saveBtn.disabled = true;
-    const label = saveBtn ? saveBtn.textContent : '';
-    try {
-      const title = editor.titleEl.value.trim();
-      const body = editor.bodyEl.value;
-      if (!title && !body) { closeEditor(); return; }
-
-      await persistFromEditor(false);
-      closeEditor();
-      render();
-      toast('Сохранено', 'ok');
-    } finally {
-      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = label; }
-    }
-  }
-
-  async function deleteFromEditor() {
-    if (!state.editingId) { closeEditor(); return; }
-    if (!(await askConfirm({
-      title: 'Переместить в корзину?',
-      message: 'Восстановить можно в течение 14 дней.',
-      actionText: 'В корзину',
-    }))) return;
-    await softDeleteItem(state.editingId);
-    closeEditor();
-    render();
-    toast('Перемещено в корзину', 'info');
-  }
-
-  function bindEditor() {
-    editor.overlay = document.getElementById('editorOverlay');
-    editor.modal = document.getElementById('editorModal');
-    editor.viewEl = document.getElementById('editorView');
-    editor.titleEl = document.getElementById('editorTitle');
-    editor.categoryEl = document.getElementById('editorCategory');
-    editor.tagsEl = document.getElementById('editorTags');
-    editor.deadlineEl = document.getElementById('editorDeadline');
-    editor.importanceEl = document.getElementById('editorImportance');
-    editor.fontEl = document.getElementById('editorFont');
-    editor.bodyEl = document.getElementById('editorBody');
-    editor.previewEl = document.getElementById('editorPreview');
-
-    document.querySelectorAll('#editorTypeSwitch button').forEach((b) => {
-      b.addEventListener('click', () => { setEditorType(b.dataset.type); scheduleAutosave(); });
-    });
-
-    document.getElementById('editorSave').addEventListener('click', saveEditor);
-    document.getElementById('editorCancel').addEventListener('click', closeEditor);
-    document.getElementById('editorCloseFoot').addEventListener('click', closeEditor);
-    document.getElementById('editorDelete').addEventListener('click', deleteFromEditor);
-    document.getElementById('editorEdit').addEventListener('click', () => {
-      enterEditMode('body');
-    });
-    // Закрытие только крестиком/кнопками (клик по фону ничего не делает).
-    // В режиме правки крестик сохраняет, в просмотре — просто закрывает.
-    document.getElementById('editorClose').addEventListener('click', () => {
-      if (editor.mode === 'edit') saveEditor(); else closeEditor();
-    });
-
-    // Выбор важности и шрифта — крупные сегменты вместо выпадающих списков.
-    document.querySelectorAll('#importanceSeg .seg-opt').forEach((b) => {
-      b.addEventListener('click', () => {
-        setImportance(b.dataset.imp);
-        editor.importanceEl.dispatchEvent(new Event('input'));
-      });
-    });
-    document.querySelectorAll('#fontSeg .seg-opt').forEach((b) => {
-      b.addEventListener('click', () => {
-        setFont(b.dataset.font);
-        editor.fontEl.dispatchEvent(new Event('input'));
-        autoGrow();
-      });
-    });
-
-    editor.bodyEl.addEventListener('input', () => { onBodyChanged(); scheduleAutosave(); });
-    [editor.titleEl, editor.categoryEl, editor.tagsEl, editor.deadlineEl, editor.importanceEl, editor.fontEl].forEach((el) => {
-      ['input', 'change'].forEach((ev) => el.addEventListener(ev, () => {
-        updateParamsSummary();
-        if (el === editor.titleEl) updateCharCount();
-        scheduleAutosave();
-      }));
-    });
-    window.addEventListener('resize', () => { if (editor.overlay.classList.contains('open')) autoGrow(); });
-
-    document.querySelectorAll('.toolbar .tool[data-md]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const md = btn.dataset.md;
-        if (md === '**') wrapSelection('**', '**', 'жирный');
-        else if (md === '*') wrapSelection('*', '*', 'курсив');
-        else if (md === 'code') wrapSelection('\n```\n', '\n```\n', 'код');
-        else if (md === 'image') insertAtCursor('![описание](https://…)');
-        else if (md === 'table') insertAtCursor('\n| A | B |\n| - | - |\n| 1 | 2 |\n');
-        else if (md === 'chart') insertAtCursor('\n```chart\n[3, 7, 4, 9, 6]\n```\n');
-      });
-    });
+      </div>`;
   }
 
   /* ====================== КОРЗИНА ====================== */
 
   function openTrash() {
-    const o = document.getElementById('trashOverlay');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
     renderTrashList();
+    openOverlay('trashOverlay');
   }
-  function closeTrash() {
-    const o = document.getElementById('trashOverlay');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-  }
+
   function renderTrashList() {
-    const list = document.getElementById('trashList');
-    const items = state.items.filter(deleted).sort((a,b) => (b.deletedAt||0) - (a.deletedAt||0));
-    if (!items.length) { list.innerHTML = '<div class="empty-state">Корзина пуста</div>'; return; }
+    const list = $('trashList');
+    const items = state.items.filter(isDeleted).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+    $('trashEmptyBtn').disabled = !items.length;
+    if (!items.length) { list.innerHTML = `<div class="empty small">${svgIcon('trash', 24, 1.5)}<div>Корзина пуста</div></div>`; return; }
     list.innerHTML = items.map((it) => {
-      const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.deletedAt||0))) / 86400000));
+      const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.deletedAt || 0))) / 86400000));
       return `
-        <div class="item-row item-row-actions">
-          <div class="item-body">
-            <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
-            <div class="item-meta">
-              <span class="mini-tag muted">${it.type === 'task' ? 'Задача' : 'Заметка'}</span>
-              <span class="mini-tag muted">осталось ${days} дн.</span>
-            </div>
+        <div class="trash-row">
+          <span class="trash-ico">${svgIcon(it.type === 'task' ? 'task' : 'note', 16)}</span>
+          <div class="row-body">
+            <div class="row-title">${escapeHtml(it.title || plainPreview(it.body, 60) || 'Без названия')}</div>
+            <div class="row-desc">удалится через ${days} ${plural(days, 'день', 'дня', 'дней')}</div>
           </div>
-          <div class="item-actions">
-            <button class="btn sm" data-restore="${it.id}">Восстановить</button>
-            <button class="btn sm ghost" data-purge="${it.id}">Удалить</button>
-          </div>
-        </div>
-      `;
+          <button class="btn sm" data-restore="${it.id}">Вернуть</button>
+          <button class="icon-btn sm" data-purge="${it.id}" title="Удалить навсегда" aria-label="Удалить навсегда">${svgIcon('close', 16)}</button>
+        </div>`;
     }).join('');
-    list.querySelectorAll('[data-restore]').forEach((b) => {
-      b.addEventListener('click', async () => { await restoreItem(b.dataset.restore); renderTrashList(); render(); toast('Восстановлено', 'ok'); });
-    });
-    list.querySelectorAll('[data-purge]').forEach((b) => {
-      b.addEventListener('click', async () => {
-        if (!(await askConfirm({ title: 'Удалить навсегда?', message: 'Это действие нельзя отменить.', actionText: 'Удалить' }))) return;
-        await purgeItem(b.dataset.purge);
-        renderTrashList(); render(); toast('Удалено навсегда', 'info');
-      });
-    });
+    list.querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', async () => {
+      await restoreItem(b.dataset.restore);
+      renderTrashList(); render(); toast('Восстановлено', 'ok');
+    }));
+    list.querySelectorAll('[data-purge]').forEach((b) => b.addEventListener('click', async () => {
+      if (!(await askConfirm({ title: 'Удалить навсегда?', message: 'Это действие нельзя отменить.' }))) return;
+      await purgeItem(b.dataset.purge);
+      renderTrashList(); render();
+    }));
   }
+
   function bindTrash() {
-    document.getElementById('trashClose').addEventListener('click', closeTrash);
-    document.getElementById('trashEmptyBtn').addEventListener('click', async () => {
-      if (!(await askConfirm({ title: 'Очистить корзину?', message: 'Все записи будут удалены безвозвратно.', actionText: 'Очистить' }))) return;
-      const all = state.items.filter(deleted);
+    $('trashEmptyBtn').addEventListener('click', async () => {
+      const all = state.items.filter(isDeleted);
+      if (!all.length) return;
+      if (!(await askConfirm({ title: 'Очистить корзину?', message: `${all.length} ${plural(all.length, 'запись будет удалена', 'записи будут удалены', 'записей будут удалены')} безвозвратно.`, actionText: 'Очистить' }))) return;
       for (const it of all) await purgeItem(it.id);
       renderTrashList(); render();
     });
   }
 
-  /* ====================== ЧЕРНОВИКИ ====================== */
+  /* ====================== АККАУНТ ====================== */
 
-  function openDrafts() {
-    const o = document.getElementById('draftsOverlay');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    renderDraftsList();
-  }
-  function closeDrafts() {
-    const o = document.getElementById('draftsOverlay');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-  }
-  function renderDraftsList() {
-    const list = document.getElementById('draftsList');
-    const items = state.items
-        .filter((x) => draft(x) && !deleted(x))
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    if (!items.length) { list.innerHTML = '<div class="empty-state">Черновиков нет</div>'; return; }
-    list.innerHTML = items.map((it) => {
-      const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.createdAt || 0))) / 86400000));
-      return `
-        <div class="item-row item-row-actions">
-          <div class="item-body">
-            <div class="item-title">${escapeHtml(it.title || '(без названия)')}</div>
-            <div class="item-meta">
-              <span class="mini-tag muted">${it.type === 'task' ? 'Задача' : 'Заметка'}</span>
-              <span class="mini-tag muted">удалится через ${days} дн.</span>
-            </div>
-          </div>
-          <div class="item-actions">
-            <button class="btn sm" data-open-draft="${it.id}">Открыть</button>
-            <button class="btn sm ghost" data-delete-draft="${it.id}">Удалить</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-    list.querySelectorAll('[data-open-draft]').forEach((b) => {
-      b.addEventListener('click', () => {
-        const it = state.items.find((x) => x.id === b.dataset.openDraft);
-        if (!it) return;
-        closeDrafts();
-        openEditor(it, it.type);
-      });
-    });
-    list.querySelectorAll('[data-delete-draft]').forEach((b) => {
-      b.addEventListener('click', async () => {
-        if (!(await askConfirm({ title: 'Удалить черновик?', message: 'Действие нельзя отменить.', actionText: 'Удалить' }))) return;
-        await purgeItem(b.dataset.deleteDraft);
-        renderDraftsList(); render();
-      });
-    });
-  }
-  function bindDrafts() {
-    document.getElementById('draftsClose').addEventListener('click', closeDrafts);
-    document.getElementById('draftsEmptyBtn').addEventListener('click', async () => {
-      if (!(await askConfirm({ title: 'Удалить все черновики?', message: 'Действие нельзя отменить.', actionText: 'Удалить' }))) return;
-      const all = state.items.filter((x) => draft(x) && !deleted(x));
-      for (const it of all) await purgeItem(it.id);
-      renderDraftsList(); render();
-    });
-  }
+  const googleIcon = () => `<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/>
+    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+    <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+    <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.3 5.3C40.9 36.5 44 31.1 44 24c0-1.3-.1-2.3-.4-3.5z"/>
+  </svg>`;
 
-  /* ====================== ССЫЛКИ (ЗАКЛАДКИ) ====================== */
-
-  function openLinks() {
-    state.mode = 'links';
-    localStorage.setItem('nf.mode', state.mode);
-    updateModeButton();
-    render();
-  }
-
-  function renderLinksView() {
-    const count = window.Links ? Links.links.length : 0;
-    return `
-      <div class="view-head">
-        <div>
-          <h1 class="view-title">Ссылки</h1>
-          <div class="view-sub" id="linksCountLabel">${count} сохранено</div>
-        </div>
-        <div class="view-actions">
-          <button class="btn ghost" id="linksSyncBtn">Синхр.</button>
-        </div>
-      </div>
-
-      <div class="links-body">
-        <div class="links-toolbar">
-          <div class="links-search">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="linksSearch" placeholder="Поиск по ссылке, тегу, домену…" autocomplete="off">
-          </div>
-          <select class="select-sm" id="linksGroupFilter"><option value="">Все группы</option></select>
-          <select class="select-sm" id="linksDomainFilter"><option value="">Все домены</option></select>
-          <select class="select-sm" id="linksSort">
-            <option value="domain">По домену</option>
-            <option value="date">По дате</option>
-            <option value="title">По названию</option>
-          </select>
-        </div>
-
-        <div class="links-add-row">
-          <input type="text" id="linksAddUrl" placeholder="https://… — вставь ссылку" autocomplete="off">
-          <input type="text" id="linksAddTitle" placeholder="Название (необязательно)" autocomplete="off">
-          <select class="select-sm" id="linksAddGroup"><option value="">Без группы</option></select>
-          <button class="btn primary" id="linksAddBtn">Добавить</button>
-        </div>
-
-        <div class="links-groups">
-          <span class="field-label">Группы</span>
-          <div class="group-chips" id="linksGroups"></div>
-          <div class="group-add">
-            <input type="text" id="linksNewGroup" placeholder="Новая группа…" autocomplete="off">
-            <button class="btn sm" id="linksAddGroupBtn">+</button>
-          </div>
-        </div>
-
-        <details class="links-blocklist">
-          <summary>Фильтр: какие ссылки НЕ сохранять</summary>
-          <div class="blocklist-add">
-            <input type="text" id="linksBlockInput" placeholder="домен (example.com) или целый URL" autocomplete="off">
-            <button class="btn sm" id="linksBlockAdd">Заблокировать</button>
-          </div>
-          <div class="blocklist-chips" id="linksBlocklist"></div>
-        </details>
-
-        <div class="links-list" id="linksList"></div>
-      </div>
-    `;
-  }
-
-  function renderLinks() {
-    renderLinksFilters();
-    renderLinksGroups();
-    renderLinksBlocklist();
-    renderLinksList();
-    const label = document.getElementById('linksCountLabel');
-    if (label) label.textContent = Links.links.length + ' сохранено';
-  }
-
-  function renderLinksFilters() {
-    const groupSel = document.getElementById('linksGroupFilter');
-    const domainSel = document.getElementById('linksDomainFilter');
-    const addGroupSel = document.getElementById('linksAddGroup');
-    const curGroup = groupSel.value;
-    const curDomain = domainSel.value;
-    const curAddGroup = addGroupSel.value;
-    groupSel.innerHTML = '<option value="">Все группы</option>' + Links.groups.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`).join('');
-    domainSel.innerHTML = '<option value="">Все домены</option>' + Links.allDomains().map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
-    addGroupSel.innerHTML = '<option value="">Без группы</option>' + Links.groups.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)}</option>`).join('');
-    groupSel.value = curGroup;
-    domainSel.value = curDomain;
-    addGroupSel.value = curAddGroup;
-  }
-
-  function renderLinksGroups() {
-    const box = document.getElementById('linksGroups');
-    if (!Links.groups.length) { box.innerHTML = '<span class="mini-tag muted">групп пока нет — добавь ниже</span>'; return; }
-    box.innerHTML = Links.groups.map(g => `
-      <span class="group-chip" data-group="${escapeHtml(g.id)}">
-        <span class="group-name">${escapeHtml(g.name)}</span>
-        <button type="button" class="group-del" data-group-del="${escapeHtml(g.id)}" title="Удалить группу">×</button>
-      </span>
-    `).join('');
-    box.querySelectorAll('.group-chip').forEach((chip) => {
-      chip.addEventListener('click', (e) => {
-        if (e.target.closest('.group-del')) return;
-        const id = chip.dataset.group;
-        const g = Links.groups.find((x) => x.id === id);
-        if (!g) return;
-        const name = prompt('Название группы', g.name);
-        if (name && name.trim()) { Links.renameGroup(id, name); renderLinks(); }
-      });
-    });
-    box.querySelectorAll('.group-del').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.dataset.groupDel;
-        if (!(await askConfirm({ title: 'Удалить группу?', message: 'Ссылки останутся, но станут без группы.', actionText: 'Удалить' }))) return;
-        Links.removeGroup(id);
-        renderLinks();
-      });
-    });
-  }
-
-  function renderLinksBlocklist() {
-    const box = document.getElementById('linksBlocklist');
-    if (!Links.blocklist.length) { box.innerHTML = '<span class="mini-tag muted">фильтров нет</span>'; return; }
-    box.innerHTML = Links.blocklist.map((b) => `
-      <span class="block-chip">
-        <span class="block-type">${b.type === 'domain' ? 'домен' : 'url'}</span>
-        <span class="block-value">${escapeHtml(b.value)}</span>
-        <button type="button" class="group-del" data-block-del="${escapeHtml(b.value)}" title="Убрать фильтр">×</button>
-      </span>
-    `).join('');
-    box.querySelectorAll('[data-block-del]').forEach((btn) => {
-      btn.addEventListener('click', () => { Links.removeBlock(btn.dataset.blockDel); renderLinks(); });
-    });
-  }
-
-  function renderLinksList() {
-    const list = document.getElementById('linksList');
-    const q = document.getElementById('linksSearch').value.trim().toLowerCase();
-    const gf = document.getElementById('linksGroupFilter').value;
-    const df = document.getElementById('linksDomainFilter').value;
-    const sort = document.getElementById('linksSort').value;
-
-    let links = Links.links.filter((l) => {
-      if (gf && l.group !== gf) return false;
-      if (df && l.domain !== df) return false;
-      if (q) {
-        const hay = (l.url + ' ' + (l.title || '') + ' ' + (l.domain || '') + ' ' + (l.tags || []).join(' ')).toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-
-    if (sort === 'date') links = [...links].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    else if (sort === 'title') links = [...links].sort((a, b) => (a.title || a.domain || '').localeCompare(b.title || b.domain || ''));
-    else links = [...links].sort((a, b) => (a.domain || '').localeCompare(b.domain || '') || (b.createdAt || 0) - (a.createdAt || 0));
-
-    if (!links.length) { list.innerHTML = '<div class="empty-state">Ссылок нет. Они появятся автоматически из твоих заметок и задач.</div>'; return; }
-
-    const groupOptions = (sel) => '<option value="">Без группы</option>' + Links.groups.map(g => `<option value="${escapeHtml(g.id)}"${g.id === sel ? ' selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
-
-    list.innerHTML = links.map((l) => `
-      <div class="link-row" data-id="${escapeHtml(l.id)}">
-        <div class="link-row-top">
-          <span class="link-dot">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>
-          <div class="link-row-text">
-            <input class="link-title-input" data-link-title="${escapeHtml(l.id)}" value="${escapeHtml(l.title)}" placeholder="${escapeHtml(l.domain || 'Название')}">
-            <div class="link-url-line">
-              <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.url)}</a>
-              <span class="mini-tag muted">${escapeHtml(l.domain)}</span>
-            </div>
-            <div class="link-row-bottom">
-              <input class="link-tags-input" data-link-tags="${escapeHtml(l.id)}" value="${escapeHtml((l.tags || []).join(', '))}" placeholder="теги через запятую">
-              <select class="select-sm link-group-select" data-link-group="${escapeHtml(l.id)}">${groupOptions(l.group)}</select>
-              <button class="btn sm ghost" data-link-del="${escapeHtml(l.id)}">Удалить</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `).join('');
-
-    list.querySelectorAll('[data-link-title]').forEach((inp) => {
-      inp.addEventListener('change', () => Links.updateLink(inp.dataset.linkTitle, { title: inp.value.trim() }));
-    });
-    list.querySelectorAll('[data-link-tags]').forEach((inp) => {
-      inp.addEventListener('change', () => Links.updateLink(inp.dataset.linkTags, { tags: inp.value.split(',').map(s => s.trim()).filter(Boolean) }));
-    });
-    list.querySelectorAll('[data-link-group]').forEach((sel) => {
-      sel.addEventListener('change', () => Links.updateLink(sel.dataset.linkGroup, { group: sel.value }));
-    });
-    list.querySelectorAll('[data-link-del]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        if (!(await askConfirm({ title: 'Удалить ссылку?', message: 'Ссылка будет убрана из коллекции.', actionText: 'Удалить' }))) return;
-        Links.removeLink(btn.dataset.linkDel);
-        renderLinks();
-        refreshSettingsNav();
-      });
-    });
-  }
-
-
-  function bindLinksView() {
-    document.getElementById('linksSearch').addEventListener('input', () => renderLinksList());
-    document.getElementById('linksGroupFilter').addEventListener('change', () => renderLinksList());
-    document.getElementById('linksDomainFilter').addEventListener('change', () => renderLinksList());
-    document.getElementById('linksSort').addEventListener('change', () => renderLinksList());
-
-    const add = () => {
-      const url = document.getElementById('linksAddUrl').value.trim();
-      const title = document.getElementById('linksAddTitle').value.trim();
-      const group = document.getElementById('linksAddGroup').value;
-      if (!url) return;
-      const res = Links.addLink(url, { title, group });
-      if (!res) { toast('Не удалось добавить ссылку', 'err'); return; }
-      document.getElementById('linksAddUrl').value = '';
-      document.getElementById('linksAddTitle').value = '';
-      renderLinks();
-      refreshSettingsNav();
-    };
-    document.getElementById('linksAddBtn').addEventListener('click', add);
-    document.getElementById('linksAddUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-
-    const addGroup = () => {
-      const inp = document.getElementById('linksNewGroup');
-      const name = inp.value.trim();
-      if (!name) return;
-      Links.addGroup(name);
-      inp.value = '';
-      renderLinks();
-    };
-    document.getElementById('linksAddGroupBtn').addEventListener('click', addGroup);
-    document.getElementById('linksNewGroup').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } });
-
-    const addBlock = () => {
-      const inp = document.getElementById('linksBlockInput');
-      const v = inp.value.trim();
-      if (!v) return;
-      Links.addBlock(v);
-      inp.value = '';
-      renderLinks();
-    };
-    document.getElementById('linksBlockAdd').addEventListener('click', addBlock);
-    document.getElementById('linksBlockInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addBlock(); } });
-
-    document.getElementById('linksSyncBtn').addEventListener('click', async () => {
-      if (!Auth.isSignedIn()) { toast('Нужно войти в аккаунт', 'err'); return; }
-      try { await Links.saveToCloud(); toast('Ссылки сохранены в аккаунт', 'ok'); }
-      catch (e) { toast('Ошибка: ' + e.message, 'err'); }
-    });
-
-    renderLinks();
-  }
-
-
-  /* ====================== НАСТРОЙКИ / АККАУНТ ====================== */
-
-  function setStatus(id, text, cls = '') {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = text;
-    el.className = 'status ' + cls;
-  }
-
-  function refreshAiSettingsForm() {
-    const a = AI.config;
-    const baseUrlEl = document.getElementById('aiBaseUrl');
-    if (!baseUrlEl) return; // модалка ещё не забинжена
-    document.getElementById('aiBaseUrl').value = a.baseUrl || '';
-    document.getElementById('aiModel').value = a.model || '';
-    document.getElementById('aiKey').value = a.apiKey || '';
-  }
-
-  function bindSettings() {
-    const overlay = document.getElementById('settingsOverlay');
-    const close = () => { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden','true'); };
-    document.getElementById('settingsClose').addEventListener('click', close);
-
-    document.querySelectorAll('#settingsTabs button').forEach((b) => {
-      b.addEventListener('click', () => switchSettingsTab(b.dataset.settingsTab));
-    });
-
-    document.getElementById('aiSave').addEventListener('click', async () => {
-      AI.setConfig({
-        apiKey: document.getElementById('aiKey').value.trim(),
-        baseUrl: document.getElementById('aiBaseUrl').value.trim(),
-        model: document.getElementById('aiModel').value.trim(),
-      });
-      const remember = document.getElementById('aiRemember');
-      if (remember && remember.checked) {
-        if (!Auth.isSignedIn()) {
-          setStatus('aiStatus', 'Сохранено локально. Чтобы запомнить на аккаунте — сначала войди', 'err');
-          return;
-        }
-        try {
-          await AI.saveToCloud();
-          setStatus('aiStatus', AI.config.enabled ? 'Сохранено на аккаунте' : 'ИИ выключен', AI.config.enabled ? 'ok' : '');
-        } catch (e) {
-          setStatus('aiStatus', 'Сохранено локально, но не на аккаунте: ' + e.message, 'err');
-        }
-      } else {
-        setStatus('aiStatus', AI.config.enabled ? 'Сохранено на этом устройстве' : 'ИИ выключен', AI.config.enabled ? 'ok' : '');
-      }
-    });
-    document.getElementById('aiTest').addEventListener('click', async () => {
-      try { const out = await AI.test(); setStatus('aiStatus', 'Ответ: ' + out, 'ok'); }
-      catch (e) { setStatus('aiStatus', e.message, 'err'); }
-    });
-    const forgetBtn = document.getElementById('aiForget');
-    if (forgetBtn) {
-      forgetBtn.addEventListener('click', async () => {
-        if (!Auth.isSignedIn()) { setStatus('aiStatus', 'Не авторизован', 'err'); return; }
-        if (!(await askConfirm({ title: 'Удалить ключ ИИ?', message: 'Настройки ИИ, сохранённые в аккаунте, будут удалены.', actionText: 'Удалить' }))) return;
-        try {
-          await AI.clearCloud();
-          setStatus('aiStatus', 'Удалено с аккаунта', 'ok');
-        } catch (e) {
-          setStatus('aiStatus', e.message, 'err');
-        }
-      });
-    }
-
-    document.getElementById('metricsClose').addEventListener('click', closeMetrics);
-
-    document.getElementById('settingsBtn').addEventListener('click', openSettingsModal);
-
-    document.getElementById('navMetrics').addEventListener('click', () => { closeSettingsModal(); openMetrics(); });
-    document.getElementById('navDrafts').addEventListener('click', () => { closeSettingsModal(); openDrafts(); });
-    document.getElementById('navTrash').addEventListener('click', () => { closeSettingsModal(); openTrash(); });
-    document.getElementById('navLinks').addEventListener('click', () => { closeSettingsModal(); openLinks(); });
-
-    bindEmailSettings();
-  }
-
-  function refreshEmailSettingsForm() {
-    const recipientEl = document.getElementById('emailRecipient');
-    const enabledEl = document.getElementById('emailEnabled');
-    if (!recipientEl || !window.Email) return;
-    recipientEl.value = Email.getRecipient();
-    enabledEl.checked = Email.isEnabled();
-  }
-
-  function bindEmailSettings() {
-    const saveBtn = document.getElementById('emailSave');
-    const testBtn = document.getElementById('emailTest');
-    if (!saveBtn || !window.Email) return;
-
-    saveBtn.addEventListener('click', () => {
-      const recipient = document.getElementById('emailRecipient').value.trim();
-      const enabled = document.getElementById('emailEnabled').checked;
-      if (enabled && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
-        setStatus('emailStatus', 'Укажи корректный email-адрес', 'err');
-        return;
-      }
-      Email.setRecipient(recipient);
-      Email.setEnabled(enabled);
-      setStatus('emailStatus', enabled ? 'Email-напоминания включены' : 'Email-напоминания выключены', enabled ? 'ok' : '');
-    });
-
-    testBtn.addEventListener('click', async () => {
-      testBtn.disabled = true;
-      try {
-        await Email.testEmail();
-        setStatus('emailStatus', 'Тестовое письмо отправлено', 'ok');
-      } catch (e) {
-        setStatus('emailStatus', e.message, 'err');
-      } finally {
-        testBtn.disabled = false;
-      }
-    });
-  }
-
-  /* ====================== ПРОВЕРКА ДЕДЛАЙНОВ ДЛЯ EMAIL ====================== */
-
-  let deadlineWatcherTimer = null;
-  function startDeadlineWatcher() {
-    clearInterval(deadlineWatcherTimer);
-    if (!window.Email) return;
-    const tick = () => { if (Auth.isSignedIn()) Email.checkDeadlines(state.items).catch(() => {}); };
-    tick();
-    deadlineWatcherTimer = setInterval(tick, 5 * 60 * 1000); // раз в 5 минут, пока вкладка открыта
-  }
-
-  function bindAccount() {
-    const overlay = document.getElementById('accountOverlay');
-    const close = () => { overlay.classList.remove('open'); overlay.setAttribute('aria-hidden','true'); };
-    document.getElementById('accountClose').addEventListener('click', close);
-    document.getElementById('accountBtn').addEventListener('click', () => {
-      overlay.classList.add('open');
-      overlay.setAttribute('aria-hidden', 'false');
-      renderAccountBody();
-    });
+  function openAccountModal() {
+    renderAccountBody();
+    openOverlay('accountOverlay');
   }
 
   function renderAccountBody() {
-    const body = document.getElementById('accountBody');
+    const body = $('accountBody');
     const user = Auth.user;
-
     if (!Auth.isConfigured()) {
-      body.innerHTML = `
-        <p class="hint">Supabase не настроен. Заполни <code>SUPABASE_URL</code> и <code>SUPABASE_ANON_KEY</code> в файле <code>.env</code> в корне проекта.</p>
-        <pre style="font-family:var(--font-mono);font-size:12px;background:var(--surface-2);padding:12px;border-radius:6px;border:1px solid var(--border);overflow-x:auto"><code>SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=eyJ...</code></pre>
-        <p class="hint">Затем перезапусти сервер.</p>
-      `;
+      body.innerHTML = `<p class="hint">Supabase не настроен. Заполни <code>SUPABASE_URL</code> и <code>SUPABASE_ANON_KEY</code> в файле <code>.env</code> и перезапусти сервер.</p>`;
       return;
     }
-
     if (!user) {
       body.innerHTML = `
-        <p class="hint">Войди через Google — все задачи и заметки будут храниться в твоём Supabase-проекте.</p>
-        <div class="row-actions" style="margin-top:20px">
-          <button class="btn primary" id="accGoogle" style="padding:10px 18px">
-            <svg width="16" height="16" viewBox="0 0 48 48" style="margin-right:2px">
-              <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.3-.4-3.5z"/>
-              <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
-              <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.2 35 26.7 36 24 36c-5.3 0-9.7-3.1-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
-              <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.3 5.3C40.9 36.5 44 31.1 44 24c0-1.3-.1-2.3-.4-3.5z"/>
-            </svg>
-            Войти через Google
-          </button>
-        </div>
-        <div class="status" id="accStatus"></div>
-      `;
-      document.getElementById('accGoogle').addEventListener('click', async () => {
-        try {
-          setStatus('accStatus', 'Открываю Google…');
-          await Auth.signInWithGoogle();
-        } catch (e) { setStatus('accStatus', e.message, 'err'); }
-      });
+        <p class="hint">Войди через Google — задачи, заметки и ссылки будут синхронизироваться между устройствами.</p>
+        <button class="btn primary lg block" id="accGoogle">${googleIcon()} Войти через Google</button>`;
+      $('accGoogle').addEventListener('click', () => Auth.signInWithGoogle().catch((e) => toast(e.message, 'err')));
       return;
     }
-
     const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Пользователь';
     const avatar = user.user_metadata?.avatar_url || user.user_metadata?.picture || '';
-    const initial = (name || '?')[0].toUpperCase();
-
     body.innerHTML = `
       <div class="account-user">
-        ${avatar
-        ? `<img src="${escapeHtml(avatar)}" alt="">`
-        : `<div class="auth-avatar-lg">${escapeHtml(initial)}</div>`}
-        <div style="min-width:0">
+        ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" referrerpolicy="no-referrer">` : `<div class="avatar-lg">${escapeHtml(name[0].toUpperCase())}</div>`}
+        <div class="account-text">
           <div class="name">${escapeHtml(name)}</div>
           <div class="email">${escapeHtml(user.email || '')}</div>
         </div>
       </div>
+      <div class="sync-note"><span class="ss-dot ok"></span>Синхронизация включена${pendingSync.size ? ` · ${pendingSync.size} в очереди` : ''}</div>
       <div class="row-actions">
         <button class="btn" id="accSync">Обновить с сервера</button>
-        <button class="btn ghost" id="accSignOut">Выйти</button>
-      </div>
-      <div class="status ok">Синхронизация включена</div>
-    `;
-    document.getElementById('accSync').addEventListener('click', async () => {
+        <button class="btn ghost danger" id="accSignOut">Выйти</button>
+      </div>`;
+    $('accSync').addEventListener('click', async () => {
+      await retryPending();
       await loadItems();
+      await Links.loadFromCloud();
       render();
-      renderAccountBody();
+      toast('Обновлено', 'ok');
     });
-    document.getElementById('accSignOut').addEventListener('click', async () => {
+    $('accSignOut').addEventListener('click', async () => {
+      await flushSave();
       await Auth.signOut();
       state.items = [];
+      closeOverlay('accountOverlay');
       render();
-      renderAccountBody();
     });
   }
 
   function updateAccountChip() {
-    const label = document.getElementById('authLabel');
-    const icon = document.getElementById('authIcon');
-    const avatar = document.getElementById('authAvatar');
-    if (!label) return;
+    const label = $('authLabel'), icon = $('authIcon'), avatar = $('authAvatar');
+    const chip = $('accountBtn');
     const u = Auth.user;
     if (u) {
       const name = u.user_metadata?.full_name || u.user_metadata?.name || u.email || 'Аккаунт';
       label.textContent = String(name).split(' ')[0];
       icon.style.display = 'none';
       avatar.hidden = false;
-
       const pic = u.user_metadata?.avatar_url || u.user_metadata?.picture;
-      if (pic) {
-        avatar.style.backgroundImage = `url(${escapeHtml(pic)})`;
-        avatar.textContent = '';
-      } else {
-        avatar.style.backgroundImage = '';
-        avatar.textContent = String(name)[0].toUpperCase();
-      }
+      avatar.style.backgroundImage = pic ? `url("${encodeURI(pic)}")` : '';
+      avatar.textContent = pic ? '' : String(name)[0].toUpperCase();
+      chip.classList.add('signed-in');
     } else {
       label.textContent = 'Войти';
       icon.style.display = '';
       avatar.hidden = true;
-      avatar.style.backgroundImage = '';
-      avatar.textContent = '';
+      chip.classList.remove('signed-in');
     }
   }
 
-  /* ====================== ИНТРО ====================== */
+  /* ====================== ПОИСК ====================== */
 
-  function playIntro() {
-    const intro = document.getElementById('intro');
-    if (!intro) return;
-    if (!window.gsap || window.matchMedia('(prefers-reduced-motion: reduce)').matches) { intro.remove(); return; }
-    const tl = gsap.timeline({ onComplete: () => intro.remove(), defaults: { ease: 'power3.out' } });
-    tl.fromTo('#introText', { opacity:0, y:10, scale:.98 }, { opacity:1, y:0, scale:1, duration:.6 })
-        .to({}, { duration: .9 })
-        .to('#introText', { opacity:0, y:-8, duration:.35, ease:'power2.in' })
-        .to('.intro-left',  { xPercent: -100, duration:.9, ease:'expo.inOut' }, '-=.15')
-        .to('.intro-right', { xPercent:  100, duration:.9, ease:'expo.inOut' }, '<')
-        .to('.intro', { autoAlpha:0, duration:.2 }, '-=.1');
-    gsap.fromTo('.topbar, .content-card', { opacity:0, y:10 }, { opacity:1, y:0, duration:.7, delay:.9, stagger:.08, ease:'power3.out', clearProps:'all' });
-  }
-
-  /* ====================== МОДАЛКИ-ХЕЛПЕРЫ (для палитры) ====================== */
-
-  function switchSettingsTab(name) {
-    document.querySelectorAll('#settingsTabs button').forEach((b) => b.classList.toggle('active', b.dataset.settingsTab === name));
-    document.querySelectorAll('.settings-tab').forEach((el) => { el.hidden = el.id !== 'settingsTab-' + name; });
-  }
-
-  function openSettingsModal() {
-    const overlay = document.getElementById('settingsOverlay');
-    overlay.classList.add('open');
-    overlay.setAttribute('aria-hidden', 'false');
-    switchSettingsTab('ai');
-    refreshAiSettingsForm();
-    const rememberEl = document.getElementById('aiRemember');
-    const rememberRow = document.getElementById('aiRememberRow');
-    if (rememberEl) rememberEl.checked = false;
-    if (rememberRow) rememberRow.hidden = !Auth.isSignedIn();
-    setStatus('aiStatus', '', '');
-    refreshEmailSettingsForm();
-    setStatus('emailStatus', '', '');
-    refreshSettingsNav();
-  }
-
-  function closeSettingsModal() {
-    const overlay = document.getElementById('settingsOverlay');
-    overlay.classList.remove('open');
-    overlay.setAttribute('aria-hidden', 'true');
-  }
-
-  function refreshSettingsNav() {
-    const draftsCount = state.items.filter((x) => draft(x) && !deleted(x)).length;
-    const trashCount = state.items.filter(deleted).length;
-    const linksCount = window.Links ? Links.links.length : 0;
-    const d = document.getElementById('navDraftsCount');
-    const t = document.getElementById('navTrashCount');
-    const l = document.getElementById('navLinksCount');
-    if (d) { d.textContent = draftsCount; d.hidden = !draftsCount; }
-    if (t) { t.textContent = trashCount; t.hidden = !trashCount; }
-    if (l) { l.textContent = linksCount; l.hidden = !linksCount; }
-  }
-
-  function openAccountModal() {
-    const overlay = document.getElementById('accountOverlay');
-    overlay.classList.add('open');
-    overlay.setAttribute('aria-hidden', 'false');
-    renderAccountBody();
-  }
-
-  /* --- Меню добавления (Задача / Заметка / Ссылка / ИИ) --- */
-  function openAddSheet() {
-    const o = document.getElementById('addSheet');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    setTimeout(() => document.getElementById('addAiInput')?.focus(), 80);
-  }
-
-  function closeAddSheet() {
-    const o = document.getElementById('addSheet');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-  }
-
-  function bindAddSheet() {
-    const overlay = document.getElementById('addSheet');
-    const input = document.getElementById('addAiInput');
-    const sendBtn = document.getElementById('addAiSend');
-
-    document.getElementById('addTaskBtn').addEventListener('click', () => { closeAddSheet(); openEditor(null, 'task'); });
-    document.getElementById('addNoteBtn').addEventListener('click', () => { closeAddSheet(); openEditor(null, 'note'); });
-    document.getElementById('addLinkBtn').addEventListener('click', () => {
-      closeAddSheet();
-      openLinks();
-      setTimeout(() => document.getElementById('linksAddUrl')?.focus(), 80);
-    });
-    document.getElementById('addSheetCancel').addEventListener('click', closeAddSheet);
-
-    const run = async () => {
-      const text = input.value.trim();
-      if (!text) return;
-      await runQuickAdd(text, sendBtn, input);
-      if (!input.value) closeAddSheet(); // успех очистил поле — закрываем
-    };
-    sendBtn.addEventListener('click', run);
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAddSheet(); });
-  }
-
-  /* ====================== ИЗМЕНИТЬ ЧЕРЕЗ ИИ (кнопка в редакторе) ====================== */
-
-  let aiEditBusy = false;
-
-  function openAiEditSheet() {
-    if (!window.AI || !AI.config.enabled) {
-      toast('ИИ не настроен — открой «Настройки» → ИИ', 'err');
-      return;
-    }
-    const o = document.getElementById('aiEditSheet');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    const custom = document.getElementById('aiEditCustomInput');
-    if (custom) custom.value = '';
-  }
-
-  function closeAiEditSheet() {
-    const o = document.getElementById('aiEditSheet');
-    if (!o) return;
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-  }
-
-  function setAiEditBusy(busy) {
-    aiEditBusy = !!busy;
-    const btn = document.getElementById('aiEditBtn');
-    if (btn) {
-      btn.classList.toggle('loading', aiEditBusy);
-      btn.disabled = aiEditBusy;
-    }
-  }
-
-  async function runAiEdit(action, customPrompt) {
-    if (aiEditBusy) return;
-    if (!window.AI || !AI.config.enabled) {
-      toast('ИИ не подключён', 'err');
-      return;
-    }
-
-    const title = editor.titleEl.value.trim();
-    const body  = editor.bodyEl.value;
-
-    if (action !== 'title' && !body.trim()) {
-      toast('Сначала напиши текст — потом правь через ИИ', 'err');
-      return;
-    }
-    if (action === 'title' && !title && !body.trim()) {
-      toast('Пустая запись — ИИ нечего править', 'err');
-      return;
-    }
-
-    // Снимок для «Отменить».
-    const before = { title, body };
-
-    closeAiEditSheet();
-    setAiEditBusy(true);
-
-    let res;
-    try {
-      res = await AI.editText({ action, customPrompt, title, body });
-    } catch (e) {
-      console.warn('[ai-edit]', e);
-      toast('ИИ не справился: ' + (e.message || 'ошибка'), 'err', 5000);
-      setAiEditBusy(false);
-      return;
-    }
-    setAiEditBusy(false);
-
-    // Пока ИИ думал, редактор могли закрыть или переключить на другую запись.
-    // В этом случае правку просто выбрасываем.
-    if (!editor.overlay.classList.contains('open') || editor.mode !== 'edit') return;
-
-    if (res.title !== undefined && res.title) editor.titleEl.value = res.title;
-    if (res.body !== undefined && res.body) editor.bodyEl.value = res.body;
-
-    onBodyChanged();
-    autoGrow();
-    updateParamsSummary();
-    scheduleAutosave();
-
-    toast('ИИ поправил текст', 'ok', 6000, {
-      label: 'Отменить',
-      onClick: () => {
-        if (editor.titleEl) editor.titleEl.value = before.title;
-        if (editor.bodyEl)  editor.bodyEl.value  = before.body;
-        onBodyChanged();
-        autoGrow();
-        scheduleAutosave();
-        toast('Вернул как было', 'info');
-      },
-    });
-  }
-
-  function bindAiEdit() {
-    const btn = document.getElementById('aiEditBtn');
-    if (!btn) return;
-
-    btn.addEventListener('click', openAiEditSheet);
-    document.getElementById('aiEditCancel').addEventListener('click', closeAiEditSheet);
-
-    document.querySelectorAll('#aiEditSheet [data-ai-action]').forEach((b) => {
-      b.addEventListener('click', () => runAiEdit(b.dataset.aiAction, null));
-    });
-
-    const custom = document.getElementById('aiEditCustomInput');
-    const customBtn = document.getElementById('aiEditCustomBtn');
-    const fire = () => {
-      const text = custom.value.trim();
-      if (!text) { custom.focus(); return; }
-      runAiEdit('custom', text);
-    };
-    customBtn.addEventListener('click', fire);
-    custom.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); fire(); }
-    });
-
-    // Закрытие по клику на фон.
-    document.getElementById('aiEditSheet').addEventListener('click', (e) => {
-      if (e.target.id === 'aiEditSheet') closeAiEditSheet();
-    });
-  }
-
-  /* ====================== КОМАНДНАЯ ПАЛИТРА (⌘/Ctrl+K) ====================== */
-
-  let paletteIndex = 0;
-  let paletteEntries = [];
-
-  function paletteCommands() {
-    const signedIn = Auth.isSignedIn();
-    return [
-      { id:'new-task', icon:'task', title:'Новая задача', hint:'задача', run: () => openEditor(null, 'task') },
-      { id:'new-note', icon:'note', title:'Новая заметка', hint:'заметка', run: () => openEditor(null, 'note') },
-      { id:'mode', icon:'swap', title:'Переключить режим', hint: state.mode === 'tasks' ? 'сейчас задачи' : state.mode === 'notes' ? 'сейчас заметки' : 'сейчас ссылки', run: () => toggleMode() },
-      { id:'theme', icon:'theme', title:'Сменить тему', hint: THEME_LABELS[state.theme] || state.theme, run: () => cycleTheme() },
-      { id:'metrics', icon:'metrics', title:'Аналитика', hint:'статистика', run: () => openMetrics() },
-      { id:'links', icon:'link', title:'Ссылки', hint:'закладки', run: () => openLinks() },
-      { id:'drafts', icon:'drafts', title:'Черновики', hint:'несохранённые', run: () => openDrafts() },
-      { id:'trash', icon:'trash', title:'Корзина', hint:'удалённые', run: () => openTrash() },
-      { id:'settings', icon:'settings', title:'Настройки', hint:'ИИ и email', run: () => openSettingsModal() },
-      { id:'account', icon:'account', title: signedIn ? 'Аккаунт' : 'Войти', hint: signedIn ? (Auth.user?.email || 'аккаунт') : 'Google', run: () => openAccountModal() },
-    ];
-  }
-
-  function paletteSearch(q) {
-    if (!q) return [];
-    const needle = q.toLowerCase();
-    return state.items
-        .filter((x) => !hidden(x))
-        .filter((x) => ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle))
-        .slice(0, 8)
-        .map((x) => ({
-          id: 'item-' + x.id,
-          icon: x.type === 'task' ? 'task' : 'note',
-          title: x.title || '(без названия)',
-          hint: x.type === 'task' ? 'задача' : 'заметка',
-          run: () => openEditor(x, x.type),
-        }));
+  function searchSnippet(text, needle) {
+    const plain = plainPreview(text, 5000);
+    const idx = needle ? plain.toLowerCase().indexOf(needle) : -1;
+    if (idx === -1) return escapeHtml(plain.slice(0, 140));
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(plain.length, idx + needle.length + 90);
+    return (start > 0 ? '…' : '') + escapeHtml(plain.slice(start, idx)) + '<mark>' + escapeHtml(plain.slice(idx, idx + needle.length)) + '</mark>' + escapeHtml(plain.slice(idx + needle.length, end)) + (end < plain.length ? '…' : '');
   }
 
   function highlightMatch(text, q) {
     const safe = escapeHtml(text);
     if (!q) return safe;
-    try {
-      const qs = escapeHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return safe.replace(new RegExp('(' + qs + ')', 'ig'), '<mark>$1</mark>');
-    } catch { return safe; }
+    const qs = escapeHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return safe.replace(new RegExp('(' + qs + ')', 'ig'), '<mark>$1</mark>');
   }
 
-  function paletteHtml(q) {
-    const ql = q.toLowerCase();
-    const cmds = paletteCommands().filter((c) => !q || c.title.toLowerCase().includes(ql));
-    const items = paletteSearch(q);
-    const parts = [];
-    if (cmds.length) {
-      parts.push('<div class="palette-section">Команды</div>');
-      cmds.forEach((c) => parts.push(
-          `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
-    }
-    if (items.length) {
-      parts.push('<div class="palette-section">Записи</div>');
-      items.forEach((c) => parts.push(
-          `<button class="palette-item" data-pid="${c.id}"><span class="pi-ico">${svgIcon(c.icon, 18)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`));
-    }
-    if (!parts.length) parts.push('<div class="palette-empty">Ничего не найдено</div>');
-    return parts.join('');
-  }
+  function renderSearch() {
+    const body = $('searchBody');
+    const needle = $('searchInput').value.trim().toLowerCase();
+    const type = state.search.type;
+    const matches = state.items.filter((x) => {
+      if (!visible(x)) return false;
+      if (type === 'task' && x.type !== 'task') return false;
+      if (type === 'note' && x.type !== 'note') return false;
+      if (type === 'red' && !(x.type === 'task' && x.importance === 'red' && !x.done)) return false;
+      if (type === 'done' && !(x.type === 'task' && x.done)) return false;
+      if (needle && !((x.title || '') + ' ' + (x.body || '')).toLowerCase().includes(needle)) return false;
+      return true;
+    }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
-  function renderPalette(q) {
-    const list = document.getElementById('paletteList');
-    paletteEntries = paletteCommands()
-        .filter((c) => !q || c.title.toLowerCase().includes(q.toLowerCase()))
-        .concat(paletteSearch(q));
-    list.innerHTML = paletteHtml(q);
-    list.querySelectorAll('.palette-item').forEach((btn, i) => {
-      btn.addEventListener('click', () => {
-        const entry = paletteEntries[i];
-        closePalette();
-        if (entry) entry.run();
-      });
-      btn.addEventListener('mousemove', () => { paletteIndex = i; updatePaletteActive(); });
-    });
-    paletteIndex = Math.min(paletteIndex, Math.max(0, paletteEntries.length - 1));
-    updatePaletteActive();
-  }
-
-  function updatePaletteActive() {
-    document.querySelectorAll('#paletteList .palette-item').forEach((btn, i) => btn.classList.toggle('active', i === paletteIndex));
-    const active = document.querySelector('#paletteList .palette-item.active');
-    if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
-  }
-
-  function openPalette() {
-    const o = document.getElementById('paletteOverlay');
-    if (!o) return;
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    const input = document.getElementById('paletteInput');
-    input.value = '';
-    paletteIndex = 0;
-    renderPalette('');
-    input.focus();
-  }
-
-  function closePalette() {
-    const o = document.getElementById('paletteOverlay');
-    if (!o) return;
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-  }
-
-  function bindPalette() {
-    const input = document.getElementById('paletteInput');
-    const overlay = document.getElementById('paletteOverlay');
-    input.addEventListener('input', () => { paletteIndex = 0; renderPalette(input.value.trim()); });
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (paletteEntries.length) { paletteIndex = (paletteIndex + 1) % paletteEntries.length; updatePaletteActive(); }
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (paletteEntries.length) { paletteIndex = (paletteIndex - 1 + paletteEntries.length) % paletteEntries.length; updatePaletteActive(); }
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        const entry = paletteEntries[paletteIndex];
-        closePalette();
-        if (entry) entry.run();
-      }
-    });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closePalette(); });
-  }
-
-  /* ====================== ПОИСК ПО ЗАДАЧАМ И ЗАМЕТКАМ ====================== */
-
-  function searchSnippet(text, needle) {
-    const idx = text.toLowerCase().indexOf(needle);
-    if (idx === -1) return escapeHtml(text.slice(0, 140));
-    const start = Math.max(0, idx - 40);
-    const end = Math.min(text.length, idx + needle.length + 80);
-    const pre = escapeHtml(text.slice(start, idx));
-    const match = escapeHtml(text.slice(idx, idx + needle.length));
-    const post = escapeHtml(text.slice(idx + needle.length, end));
-    return (start > 0 ? '…' : '') + pre + '<mark>' + match + '</mark>' + post + (end < text.length ? '…' : '');
-  }
-
-  function searchResultHtml(it, needle) {
-    const meta = [];
-    if (it.category) meta.push(`<span class="mini-tag muted">${escapeHtml(it.category)}</span>`);
-    (it.tags || []).slice(0, 3).forEach((t) => meta.push(`<span class="mini-tag">#${escapeHtml(t)}</span>`));
-    if (it.type === 'task' && it.deadline) {
-      const rem = remaining(it.deadline);
-      const cls = rem && rem.kind === 'overdue' ? 'timer overdue' : rem && rem.kind === 'soon' ? 'timer soon' : 'timer';
-      meta.push(`<span class="${cls}">${escapeHtml(rem ? rem.text : '')}</span>`);
-    }
-    const desc = it.body
-        ? `<div class="search-desc">${searchSnippet(it.body, needle)}</div>`
-        : '<div class="search-desc sr-none">Без текста</div>';
-    return `
-      <button class="search-result" data-open="${it.id}">
-        <span class="sr-type">${svgIcon(it.type === 'task' ? 'task' : 'note', 14)}</span>
-        <span class="sr-body">
-          <span class="sr-title">${highlightMatch(it.title || '(без названия)', needle)}</span>
-          ${desc}
-          <span class="sr-meta">${meta.join('')}</span>
-        </span>
-      </button>
-    `;
-  }
-
-  function renderSearch(q) {
-    const body = document.getElementById('searchBody');
-    const needle = q.trim().toLowerCase();
-    const type = state.filter.type;
-    const imp = state.filter.importance;
-    const cat = state.filter.category;
-
-    const matchesType = (x) => type === 'all' || x.type === type;
-    const matchesImp = (x) => x.type !== 'task' || imp === 'all' || x.importance === imp;
-    const matchesCat = (x) => cat === 'all' || (x.category || '') === cat;
-    const matchesQuery = (x) => !needle || ((x.title||'') + ' ' + (x.body||'') + ' ' + (x.tags||[]).join(' ')).toLowerCase().includes(needle);
-
-    if (!needle && type === 'all' && imp === 'all' && cat === 'all') {
-      body.innerHTML = '<div class="search-hint">Начни вводить — ищу сразу по заголовкам, тексту и тегам.<br>Или задай фильтры выше.<br>Переход между результатами — <kbd>↑</kbd> <kbd>↓</kbd>, открыть — <kbd>Enter</kbd></div>';
+    if (!needle && type === 'all') {
+      body.innerHTML = '<div class="search-hint">Ищу по заголовкам и тексту.<br><kbd>↑</kbd> <kbd>↓</kbd> — выбор, <kbd>Enter</kbd> — открыть</div>';
       return;
     }
+    if (!matches.length) { body.innerHTML = '<div class="empty small">Ничего не найдено</div>'; return; }
 
-    const allMatches = state.items.filter((x) => !hidden(x) && matchesType(x) && matchesImp(x) && matchesCat(x) && matchesQuery(x));
-    const tasks = allMatches.filter((x) => x.type === 'task').sort((a, b) => (a.deadline || Infinity) - (b.deadline || Infinity));
-    const notes = allMatches.filter((x) => x.type === 'note').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    body.innerHTML = matches.slice(0, 80).map((it, i) => {
+      const meta = [];
+      if (it.type === 'task' && it.done) meta.push('<span class="meta-pill muted">выполнено</span>');
+      else if (it.type === 'task' && it.deadline) {
+        const rem = remaining(it.deadline);
+        meta.push(`<span class="meta-pill ${rem.kind}">${escapeHtml(fmtHuman(it.deadline))}</span>`);
+      }
+      if (it.type === 'task' && it.importance === 'red' && !it.done) meta.push('<span class="meta-pill red"><span class="dot red"></span>Важно</span>');
+      return `
+        <button class="search-result ${i === 0 ? 'active' : ''}" data-open="${it.id}">
+          <span class="sr-ico">${svgIcon(it.type === 'task' ? 'task' : 'note', 16)}</span>
+          <span class="sr-body">
+            <span class="sr-title">${highlightMatch(it.title || 'Без названия', needle)}</span>
+            ${it.body ? `<span class="sr-desc">${searchSnippet(it.body, needle)}</span>` : ''}
+            ${meta.length ? `<span class="row-meta">${meta.join('')}</span>` : ''}
+          </span>
+        </button>`;
+    }).join('');
 
-    const parts = [];
-    if (tasks.length) {
-      parts.push(`<div class="search-section">Задачи · ${tasks.length}</div>`);
-      tasks.forEach((it) => parts.push(searchResultHtml(it, needle)));
-    }
-    if (notes.length) {
-      parts.push(`<div class="search-section">Заметки · ${notes.length}</div>`);
-      notes.forEach((it) => parts.push(searchResultHtml(it, needle)));
-    }
-    if (!parts.length) parts.push('<div class="empty-state">Ничего не найдено</div>');
-    body.innerHTML = parts.join('');
-
-    body.querySelectorAll('.search-result').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const it = state.items.find((x) => x.id === btn.dataset.open);
-        if (!it) return;
-        closeSearch();
-        openEditor(it, it.type);
-      });
-    });
+    body.querySelectorAll('.search-result').forEach((btn) => btn.addEventListener('click', () => {
+      const it = state.items.find((x) => x.id === btn.dataset.open);
+      if (!it) return;
+      closeOverlay('searchOverlay');
+      openEditor(it);
+    }));
   }
 
-  function openSearch() {
-    const o = document.getElementById('searchOverlay');
-    o.classList.add('open');
-    o.setAttribute('aria-hidden', 'false');
-    const input = document.getElementById('searchInput');
-    input.value = '';
-    populateSearchCategories();
-    syncSearchFilters();
-    renderSearch('');
-    setTimeout(() => input.focus(), 60);
+  function openSearch(type = 'all') {
+    if (!Auth.isSignedIn()) { openAccountModal(); return; }
+    state.search.type = type;
+    document.querySelectorAll('#searchType .chip').forEach((x) => x.classList.toggle('active', x.dataset.type === type));
+    $('searchInput').value = '';
+    renderSearch();
+    openOverlay('searchOverlay');
+    setTimeout(() => $('searchInput').focus(), 50);
   }
 
-  function closeSearch() {
-    const o = document.getElementById('searchOverlay');
-    o.classList.remove('open');
-    o.setAttribute('aria-hidden', 'true');
-  }
-
-  function populateSearchCategories() {
-    const sel = document.getElementById('searchCategory');
-    if (!sel) return;
-    const cats = new Set();
-    state.items.forEach((it) => { if (!hidden(it) && it.category) cats.add(it.category); });
-    const prev = sel.value;
-    sel.innerHTML = '<option value="all">Все категории</option>' +
-        [...cats].sort().map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-    if (prev) sel.value = prev;
-  }
-
-  function syncSearchFilters() {
-    document.querySelectorAll('#searchType button').forEach((x) => x.classList.toggle('active', x.dataset.type === state.filter.type));
-    document.querySelectorAll('#searchImportance .chip').forEach((x) => x.classList.toggle('active', x.dataset.imp === state.filter.importance));
-    document.getElementById('searchImportance').style.display = state.filter.type === 'note' ? 'none' : '';
-    document.getElementById('searchCategory').value = state.filter.category;
+  function moveActive(container, selector, dir) {
+    const items = [...container.querySelectorAll(selector)];
+    if (!items.length) return;
+    let idx = items.findIndex((el) => el.classList.contains('active'));
+    idx = dir > 0 ? (idx + 1) % items.length : idx <= 0 ? items.length - 1 : idx - 1;
+    items.forEach((el) => el.classList.remove('active'));
+    items[idx].classList.add('active');
+    items[idx].scrollIntoView({ block: 'nearest' });
   }
 
   function bindSearch() {
-    document.getElementById('searchBtn').addEventListener('click', openSearch);
-    document.getElementById('searchClose').addEventListener('click', closeSearch);
-    const input = document.getElementById('searchInput');
-    input.addEventListener('input', () => renderSearch(input.value));
-
-    document.querySelectorAll('#searchType button').forEach((b) => {
-      b.addEventListener('click', () => {
-        state.filter.type = b.dataset.type;
-        document.querySelectorAll('#searchType button').forEach((x) => x.classList.toggle('active', x === b));
-        document.getElementById('searchImportance').style.display = state.filter.type === 'note' ? 'none' : '';
-        renderSearch(input.value);
-      });
-    });
-    document.querySelectorAll('#searchImportance .chip').forEach((c) => {
-      c.addEventListener('click', () => {
-        state.filter.importance = c.dataset.imp;
-        document.querySelectorAll('#searchImportance .chip').forEach((x) => x.classList.toggle('active', x === c));
-        renderSearch(input.value);
-      });
-    });
-    document.getElementById('searchCategory').addEventListener('change', (e) => {
-      state.filter.category = e.target.value;
-      renderSearch(input.value);
-    });
-
+    $('searchBtn').addEventListener('click', () => openSearch());
+    const input = $('searchInput');
+    input.addEventListener('input', renderSearch);
+    document.querySelectorAll('#searchType .chip').forEach((c) => c.addEventListener('click', () => {
+      state.search.type = c.dataset.type;
+      document.querySelectorAll('#searchType .chip').forEach((x) => x.classList.toggle('active', x === c));
+      renderSearch();
+    }));
     input.addEventListener('keydown', (e) => {
-      const items = [...document.querySelectorAll('#searchBody .search-result')];
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (!items.length) return;
-        const idx = items.findIndex((el) => el.classList.contains('active'));
-        const next = (idx + 1) % items.length;
-        items.forEach((el) => el.classList.remove('active'));
-        items[next].classList.add('active');
-        items[next].scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (!items.length) return;
-        const idx = items.findIndex((el) => el.classList.contains('active'));
-        const prev = idx <= 0 ? items.length - 1 : idx - 1;
-        items.forEach((el) => el.classList.remove('active'));
-        items[prev].classList.add('active');
-        items[prev].scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'Enter') {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveActive($('searchBody'), '.search-result', 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive($('searchBody'), '.search-result', -1); }
+      else if (e.key === 'Enter') {
         const active = document.querySelector('#searchBody .search-result.active');
         if (active) { e.preventDefault(); active.click(); }
       }
     });
   }
 
-  /* ====================== СКРОЛЛ-ЛОК ФОНА ====================== */
+  /* ====================== КОМАНДНАЯ ПАЛИТРА (Ctrl/⌘+K) ====================== */
+
+  let paletteEntries = [];
+
+  function paletteCommands() {
+    const signedIn = Auth.isSignedIn();
+    return [
+      { icon: 'task', title: 'Новая задача', hint: 'Ctrl+N', run: () => openEditor(null, 'task') },
+      { icon: 'note', title: 'Новая заметка', hint: '', run: () => openEditor(null, 'note') },
+      { icon: 'link', title: 'Добавить ссылку', hint: '', run: () => { setMode('links'); setTimeout(() => $('linkAddInput')?.focus(), 60); } },
+      { icon: 'task', title: 'Раздел: Задачи', hint: '', run: () => setMode('tasks') },
+      { icon: 'note', title: 'Раздел: Заметки', hint: '', run: () => setMode('notes') },
+      { icon: 'link', title: 'Раздел: Ссылки', hint: '', run: () => setMode('links') },
+      { icon: 'theme', title: 'Сменить тему', hint: resolvedTheme() === 'dark' ? 'тёмная' : 'светлая', run: toggleTheme },
+      { icon: 'metrics', title: 'Аналитика', hint: '', run: openMetrics },
+      { icon: 'trash', title: 'Корзина', hint: '', run: openTrash },
+      { icon: 'settings', title: 'Настройки', hint: '', run: openSettings },
+      { icon: 'account', title: signedIn ? 'Аккаунт' : 'Войти', hint: signedIn ? (Auth.user?.email || '') : 'Google', run: openAccountModal },
+    ];
+  }
+
+  function renderPalette() {
+    const q = $('paletteInput').value.trim();
+    const ql = q.toLowerCase();
+    const cmds = paletteCommands().filter((c) => !q || c.title.toLowerCase().includes(ql));
+    const items = !q ? [] : state.items
+      .filter((x) => visible(x) && ((x.title || '') + ' ' + (x.body || '')).toLowerCase().includes(ql))
+      .slice(0, 8)
+      .map((x) => ({ icon: x.type === 'task' ? 'task' : 'note', title: x.title || 'Без названия', hint: x.type === 'task' ? 'задача' : 'заметка', run: () => openEditor(x) }));
+    paletteEntries = cmds.concat(items);
+    const row = (c, i) => `<button class="palette-item ${i === 0 ? 'active' : ''}" data-pi="${i}"><span class="pi-ico">${svgIcon(c.icon, 17)}</span><span class="pi-title">${highlightMatch(c.title, q)}</span><span class="pi-hint">${escapeHtml(c.hint)}</span></button>`;
+    const parts = [];
+    if (cmds.length) parts.push('<div class="palette-section">Команды</div>', ...cmds.map((c, i) => row(c, i)));
+    if (items.length) parts.push('<div class="palette-section">Записи</div>', ...items.map((c, i) => row(c, i + cmds.length)));
+    if (!parts.length) parts.push('<div class="empty small">Ничего не найдено</div>');
+    const list = $('paletteList');
+    list.innerHTML = parts.join('');
+    list.querySelectorAll('.palette-item').forEach((btn) => {
+      btn.addEventListener('click', () => runPaletteEntry(+btn.dataset.pi));
+      btn.addEventListener('mousemove', () => {
+        if (btn.classList.contains('active')) return;
+        list.querySelectorAll('.palette-item').forEach((x) => x.classList.toggle('active', x === btn));
+      });
+    });
+  }
+
+  function runPaletteEntry(i) {
+    const entry = paletteEntries[i];
+    closeOverlay('paletteOverlay');
+    if (entry) entry.run();
+  }
+
+  function openPalette() {
+    $('paletteInput').value = '';
+    renderPalette();
+    openOverlay('paletteOverlay');
+    setTimeout(() => $('paletteInput').focus(), 30);
+  }
+
+  function bindPalette() {
+    const input = $('paletteInput');
+    input.addEventListener('input', renderPalette);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveActive($('paletteList'), '.palette-item', 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive($('paletteList'), '.palette-item', -1); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        const active = document.querySelector('#paletteList .palette-item.active');
+        if (active) runPaletteEntry(+active.dataset.pi);
+      }
+    });
+  }
+
+  /* ====================== ПРОЧЕЕ ====================== */
 
   function bindScrollLock() {
     const update = () => {
-      const anyOpen = !!document.querySelector('.modal-overlay.open, .palette-overlay.open, .sheet-overlay.open');
+      const anyOpen = !!document.querySelector('.modal-overlay.open');
       document.documentElement.classList.toggle('no-scroll', anyOpen);
-      document.body.classList.toggle('no-scroll', anyOpen);
     };
     new MutationObserver(update).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'], childList: true });
     update();
   }
 
-  /* ====================== ЭКРАННАЯ КЛАВИАТУРА ====================== */
-
+  // Высота видимой области с учётом экранной клавиатуры (iOS/Android).
   function bindViewport() {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -2483,116 +2051,141 @@ SUPABASE_ANON_KEY=eyJ...</code></pre>
     set();
   }
 
-  /* ====================== СЕТЬ (онлайн/офлайн) ====================== */
-
   function bindNetwork() {
-    window.addEventListener('offline', () => toast('Нет соединения — работаем офлайн', 'err', 4200));
-    window.addEventListener('online', () => toast('Соединение восстановлено', 'ok'));
+    window.addEventListener('offline', () => toast('Нет соединения — изменения сохранятся позже', 'err', 4200));
+    window.addEventListener('online', () => { toast('Соединение восстановлено', 'ok'); retryPending(); });
   }
-
-  /* ====================== ГОРЯЧИЕ КЛАВИШИ ====================== */
 
   function bindHotkeys() {
     document.addEventListener('keydown', (e) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
       if (e.key === 'Escape') {
-        // 1. Палитра — она перекрывает всё.
-        const palette = document.getElementById('paletteOverlay');
-        if (palette && palette.classList.contains('open')) { closePalette(); return; }
-        // 2. Лист «Изменить через ИИ» — поверх редактора.
-        const aiSheet = document.getElementById('aiEditSheet');
-        if (aiSheet && aiSheet.classList.contains('open')) { closeAiEditSheet(); return; }
-        // 3. Редактор — закрываем и выходим, чтобы не трогать другие модалки.
-        if (editor.overlay.classList.contains('open')) { closeEditor(); return; }
-        // 4. Всё остальное — закрываем стандартные модалки.
-        document.querySelectorAll('.modal-overlay.open').forEach((o) => { o.classList.remove('open'); o.setAttribute('aria-hidden','true'); });
+        if (document.querySelector('.confirm-overlay')) return;
+        const top = topOverlay();
+        if (!top) return;
+        e.preventDefault();
+        if (top.id === 'editorOverlay') closeEditor(); else closeOverlay(top.id);
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if (mod && (k === 'k' || k === 'л')) {
+        if (document.activeElement === editor.bodyEl) return; // в редакторе — вставка ссылки
         e.preventDefault();
         openPalette();
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      if (mod && (k === 'n' || k === 'т') && !e.shiftKey) {
+        if (!Auth.isSignedIn()) return;
         e.preventDefault();
-        openEditor(null, state.mode === 'tasks' ? 'task' : 'note');
+        if (editor.overlay.classList.contains('open')) return;
+        openEditor(null, state.mode === 'notes' ? 'note' : 'task');
+        return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        if (editor.overlay.classList.contains('open') && editor.mode === 'edit') { e.preventDefault(); saveEditor(); }
+      if (mod && (k === 's' || k === 'ы')) {
+        e.preventDefault();
+        if (editor.overlay.classList.contains('open')) { editor.dirty = true; flushSave(); }
+        return;
       }
-      if (e.key === '/' && !(e.ctrlKey || e.metaKey)) {
+      if (e.key === '/' && !mod) {
         const tag = document.activeElement && document.activeElement.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-        if (editor.overlay.classList.contains('open')) return;
+        if (topOverlay()) return;
         e.preventDefault();
         openSearch();
       }
     });
   }
 
-  /* ====================== SERVICE WORKER ====================== */
-
   async function registerSW() {
     if (!('serviceWorker' in navigator)) return;
-    try { await navigator.serviceWorker.register('/service-worker.js'); } catch {}
+    try { await navigator.serviceWorker.register('/service-worker.js'); } catch { /* ignore */ }
   }
 
   /* ====================== СТАРТ ====================== */
 
   async function init() {
-    state.theme = localStorage.getItem('nf.theme') || 'noir';
-    state.mode = localStorage.getItem('nf.mode') || 'tasks';
-    applyTheme(state.theme);
-    updateModeButton();
-
-    await Auth.ready;
-
-    Auth.onChange(() => {
-      updateAccountChip();
-      const o = document.getElementById('accountOverlay');
-      if (o && o.classList.contains('open')) renderAccountBody();
-      if (Auth.isSignedIn()) {
-        loadItems().then(render);
-        AI.loadFromCloud().then((got) => { if (got) refreshAiSettingsForm(); });
-        if (window.Links) Links.loadFromCloud();
-      } else { state.items = []; setSyncStatus('', ''); render(); }
-    });
-    updateAccountChip();
-
-    if (Auth.isSignedIn()) {
-      await loadItems();
-      await AI.loadFromCloud();
-      if (window.Links) await Links.loadFromCloud();
+    try {
+      state.themePref = localStorage.getItem('nf.theme') || 'dark';
+      state.accent = localStorage.getItem('nf.accent') || 'mono';
+      state.mode = localStorage.getItem('nf.mode') || 'tasks';
+    } catch { /* ignore */ }
+    if (!['dark', 'light', 'system'].includes(state.themePref)) state.themePref = 'dark';
+    if (!ACCENTS.some((a) => a.id === state.accent)) state.accent = 'mono';
+    if (!['tasks', 'notes', 'links'].includes(state.mode)) state.mode = 'tasks';
+    applyTheme();
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => { if (state.themePref === 'system') applyTheme(); });
     }
 
     bindEditor();
-    bindSettings();
+    bindOverlays();
     bindTrash();
-    bindDrafts();
     bindHotkeys();
-    bindAccount();
     bindPalette();
     bindNetwork();
     bindSearch();
     bindScrollLock();
     bindViewport();
-    bindAddSheet();
-    bindAiEdit();
 
-    document.getElementById('themeBtn').addEventListener('click', cycleTheme);
+    $('themeBtn').addEventListener('click', toggleTheme);
+    $('settingsBtn').addEventListener('click', openSettings);
+    $('accountBtn').addEventListener('click', openAccountModal);
+    $('fabAdd').addEventListener('click', addForCurrentMode);
     document.querySelectorAll('#modeTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
-    document.getElementById('fabAdd').addEventListener('click', openAddSheet);
+    window.addEventListener('resize', () => moveIndicator($('modeTabs')));
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => moveIndicator($('modeTabs')));
 
+    // Ссылки поменялись (в т.ч. пришли из облака) — обновляем раздел.
+    Links.onChange(() => {
+      if (state.mode !== 'links' || $('linkOverlay').classList.contains('open')) return;
+      const active = document.activeElement;
+      if (active && (active.id === 'linkSearch' || active.id === 'linkAddInput')) { renderLinkGroups(); renderLinksList(); updateLinksSub(); return; }
+      render();
+    });
+
+    updateModeTabs();
+    render(); // скелетон / экран входа, пока ждём сессию
+
+    await Auth.ready;
+    state.authReady = true;
+    updateAccountChip();
+
+    let lastUserId = Auth.user?.id || null;
+    Auth.onChange(async (u) => {
+      updateAccountChip();
+      if ($('accountOverlay').classList.contains('open')) renderAccountBody();
+      const id = u?.id || null;
+      if (id === lastUserId) return; // обновление токена — не перезагружаем
+      lastUserId = id;
+      if (id) {
+        state.loaded = false; state.animateNext = true; render();
+        await loadItems();
+        Links.loadFromCloud();
+      } else {
+        state.items = []; state.loaded = false;
+      }
+      state.animateNext = true;
+      render();
+    });
+
+    if (Auth.isSignedIn()) {
+      await loadItems();
+      Links.loadFromCloud();
+    }
+    state.animateNext = true;
     render();
     registerSW();
-    startDeadlineWatcher();
+    setInterval(() => { if (pendingSync.size) retryPending(); }, 30000);
+    // Раз в минуту обновляем «через N мин» в списке задач.
+    setInterval(() => { if (state.mode === 'tasks' && !topOverlay() && Auth.isSignedIn()) render(); }, 60000);
 
-    // Глубокие ссылки из ярлыков PWA: /?action=new-task или /?action=new-note
+    // Ярлыки PWA: /?action=new-task или /?action=new-note
     const action = new URLSearchParams(location.search).get('action');
-    if (action === 'new-task') openEditor(null, 'task');
-    else if (action === 'new-note') openEditor(null, 'note');
+    if (Auth.isSignedIn()) {
+      if (action === 'new-task') openEditor(null, 'task');
+      else if (action === 'new-note') openEditor(null, 'note');
+    }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    playIntro();
-    init();
-  });
+  document.addEventListener('DOMContentLoaded', init);
 })();

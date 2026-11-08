@@ -39,7 +39,7 @@
             done: !!item.done,
             deleted: !!item.deleted,
             deleted_at: toIso(item.deletedAt),
-            draft: !!item.draft,
+            draft: false,
             font: item.font === 'mono' ? 'mono' : 'sans',
             created_at: toIso(item.createdAt) || new Date().toISOString(),
             updated_at: toIso(item.updatedAt) || new Date().toISOString(),
@@ -116,20 +116,5 @@
         if (error) throw error;
     }
 
-    // Черновики (draft=true, ни разу не сохранённые явно кнопкой «Сохранить»)
-    // живут те же 14 дней, но с момента СОЗДАНИЯ, а не удаления — у них нет
-    // отдельной deleted_at-метки.
-    async function purgeExpiredDrafts() {
-        const userId = currentUserId();
-        const cutoff = new Date(Date.now() - TRASH_TTL_MS).toISOString();
-        const { error } = await client()
-            .from(TABLE)
-            .delete()
-            .eq('user_id', userId)
-            .eq('draft', true)
-            .lt('created_at', cutoff);
-        if (error) throw error;
-    }
-
-    window.DB = { allItems, upsertItem, deleteItem, purgeExpired, purgeExpiredDrafts };
+    window.DB = { allItems, upsertItem, deleteItem, purgeExpired };
 })();
