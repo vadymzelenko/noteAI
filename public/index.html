@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>NodeFlow — задачи и заметки</title>
-  <meta name="description" content="NodeFlow — быстрый менеджер задач, заметок и ссылок с markdown и синхронизацией.">
+  <meta name="description" content="NodeFlow — задачи, заметки, ссылки и проекты с деревом мыслей, файлами и отчётами.">
 
   <meta name="theme-color" content="#09090b">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https: wss:; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self' https: wss:; base-uri 'self'; form-action 'self'; object-src 'none'">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/icon.svg">
@@ -58,6 +58,7 @@
     <button type="button" data-mode="tasks" class="active">Задачи</button>
     <button type="button" data-mode="notes">Заметки</button>
     <button type="button" data-mode="links">Ссылки</button>
+    <button type="button" data-mode="projects">Проекты</button>
   </nav>
 
   <main class="view" id="viewRoot"></main>
@@ -231,9 +232,95 @@
   </div>
 </div>
 
+<!-- ================= Проект: блок дерева / запись журнала ================= -->
+<div class="modal-overlay editor-overlay custom-close" id="recOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Блок проекта">
+  <div class="modal editor">
+    <header class="editor-head">
+      <nav class="crumbs" id="recCrumbs" aria-label="Путь"></nav>
+      <span class="save-state" id="recSave" role="status" aria-live="polite"></span>
+      <div class="editor-head-actions">
+        <button class="icon-btn" id="recDelete" title="Удалить" aria-label="Удалить">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </button>
+        <button class="icon-btn" id="recClose" title="Закрыть (Esc)" aria-label="Закрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </header>
+    <div class="editor-scroll" id="recScroll">
+      <input class="editor-title" id="recTitle" type="text" placeholder="Название блока" autocomplete="off">
+      <div class="task-meta rec-meta" id="recMeta"></div>
+      <div class="toolbar" id="recToolbar" role="toolbar" aria-label="Форматирование"></div>
+      <textarea class="editor-body" id="recBody" spellcheck="true"></textarea>
+      <div class="editor-preview md" id="recPreview" hidden></div>
+      <section class="rec-section">
+        <div class="rec-sec-head"><span>Файлы</span><button class="btn sm" id="recAttach">+ Файл</button></div>
+        <div class="file-grid compact" id="recFiles"></div>
+      </section>
+      <section class="rec-section" id="recKidsSec">
+        <div class="rec-sec-head"><span>Подблоки</span><button class="btn sm" id="recAddKid">+ Подблок</button></div>
+        <div class="kid-list" id="recKids"></div>
+      </section>
+    </div>
+    <footer class="editor-foot">
+      <span class="char-count" id="recCount" aria-hidden="true"></span>
+      <button class="btn primary" id="recDone">Готово</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ================= Проект: настройки ================= -->
+<div class="modal-overlay" id="projOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Проект">
+  <div class="modal">
+    <header class="modal-head">
+      <h2 class="modal-title">Проект</h2>
+      <button class="icon-btn" data-close title="Закрыть" aria-label="Закрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </header>
+    <div class="modal-body" id="projBody"></div>
+  </div>
+</div>
+
+<!-- ================= Просмотр файла ================= -->
+<div class="modal-overlay" id="fileOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Файл">
+  <div class="modal modal-lg file-modal">
+    <header class="modal-head">
+      <div class="file-title" id="fileTitle"></div>
+      <div class="file-actions">
+        <button class="icon-btn" id="fileOpen" title="Открыть в новой вкладке" aria-label="Открыть в новой вкладке">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </button>
+        <button class="icon-btn" id="fileDownload" title="Скачать" aria-label="Скачать">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="icon-btn" id="fileDelete" title="Удалить" aria-label="Удалить">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </button>
+        <button class="icon-btn" data-close title="Закрыть" aria-label="Закрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </header>
+    <div class="modal-body file-body" id="fileBody"></div>
+  </div>
+</div>
+
+<!-- ================= Отчёт по проекту ================= -->
+<div class="modal-overlay report-overlay custom-close" id="reportOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Отчёт">
+  <div class="report-bar">
+    <button class="btn ghost" id="reportClose">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>Назад
+    </button>
+    <div class="report-opts" id="reportOpts"></div>
+    <button class="btn primary" id="reportPrint">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Печать / PDF
+    </button>
+  </div>
+  <div class="report-scroll"><div class="paper" id="reportPaper"></div></div>
+</div>
+
+<input type="file" id="projFileInput" multiple hidden>
+
 <div class="toast-stack" id="toastStack" role="status" aria-live="polite"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-markup.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-css.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
@@ -249,6 +336,7 @@
 <script src="/js/db.js"></script>
 <script src="/js/links.js"></script>
 <script src="/js/app.js"></script>
+<script src="/js/projects.js"></script>
 
 </body>
 </html>
