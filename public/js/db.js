@@ -106,6 +106,14 @@
         if (error) throw error;
     }
 
+    // Обновить только метаданные (tags) — не трогая содержимое файла в body.
+    async function updateTags(id, tags) {
+        const { error } = await client().from(TABLE)
+            .update({ tags, updated_at: new Date().toISOString() })
+            .eq('id', id).eq('user_id', currentUserId());
+        if (error) throw error;
+    }
+
     async function deleteMany(ids) {
         if (!ids.length) return;
         const userId = currentUserId();
@@ -149,5 +157,5 @@
         if (error) throw error;
     }
 
-    window.DB = { allItems, upsertItem, putItem, fileData, deleteItem, deleteMany, purgeExpired };
+    window.DB = { allItems, upsertItem, putItem, fileData, updateTags, deleteItem, deleteMany, purgeExpired };
 })();

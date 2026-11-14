@@ -2188,7 +2188,6 @@ button.crumb:hover { background: var(--surface-2); color: var(--text); }
 .rp-foot { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e4e4e7; color: #a1a1aa; font-size: 11px; text-align: center; }
 
 /* ---------- Печать ---------- */
-@page { margin: 16mm 14mm; }
 @media print {
   html, body { background: #fff !important; height: auto !important; overflow: visible !important; color-scheme: light !important; }
   body.printing-report > *:not(#reportOverlay) { display: none !important; }
@@ -2199,7 +2198,8 @@ button.crumb:hover { background: var(--surface-2); color: var(--text); }
     visibility: visible !important;
     background: #fff !important;
   }
-  body.printing-report .report-bar { display: none !important; }
+  body.printing-report .report-bar, body.printing-report .report-panel { display: none !important; }
+  body.printing-report .report-main { display: block !important; overflow: visible !important; }
   body.printing-report .report-scroll { padding: 0 !important; overflow: visible !important; }
   body.printing-report .paper {
     width: auto !important;
@@ -2326,3 +2326,201 @@ button.crumb:hover { background: var(--surface-2); color: var(--text); }
   .json-text { min-height: 240px; }
   .rp-links { columns: 1; }
 }
+
+/* ============================================================
+   ОТЧЁТ v2: панель состава, обложка, Ч/Б, пометки
+   ============================================================ */
+
+.report-title { font-weight: 650; font-size: 15px; margin-right: auto; }
+#reportCompose.active { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.report-main { flex: 1; min-height: 0; display: flex; position: relative; }
+.report-main .report-scroll { flex: 1; min-width: 0; }
+.report-panel {
+  width: 360px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  animation: panelIn .35s var(--ease) both;
+}
+@keyframes panelIn { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.rpp-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 10px 12px 18px; border-bottom: 1px solid var(--border); }
+.rpp-body { flex: 1; overflow: auto; padding: 8px 10px 30px; overscroll-behavior: contain; }
+.rpp-sec { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.rpp-sec h4 { display: flex; align-items: center; justify-content: space-between; margin: 4px 8px 6px; font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.rpp-all { border: 0; background: transparent; color: var(--accent); font-size: 12px; text-transform: none; letter-spacing: 0; padding: 2px 6px; border-radius: 6px; }
+[data-accent='mono'] .rpp-all { color: var(--text); text-decoration: underline; }
+.rpp-row { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 8px; font-size: 13.5px; cursor: pointer; min-width: 0; }
+.rpp-row:hover { background: var(--surface-2); }
+.rpp-row input { accent-color: var(--accent); margin: 0; flex: none; width: 16px; height: 16px; }
+.rpp-num { color: var(--faint); font-variant-numeric: tabular-nums; flex: none; font-size: 12px; }
+.rpp-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpp-t small { display: block; color: var(--faint); font-size: 11.5px; }
+.rpp-file { padding-bottom: 4px; }
+.rpp-file-tools { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 33px; flex-wrap: wrap; }
+.rpp-file-tools:empty { display: none; }
+.rpp-pages { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.rpp-pages .input { height: 30px; width: 120px; font-size: 12.5px; padding: 0 8px; }
+.rpp-hint { margin: 14px 8px 0; font-size: 12.5px; }
+
+/* --- Лист отчёта --- */
+.rp-doc { counter-reset: none; }
+.rp-cover-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: 980px;
+  padding-bottom: 20px;
+  margin-bottom: 40px;
+  border-bottom: 1px dashed #d4d4d8;
+  break-after: page;
+  page-break-after: always;
+}
+.rp-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .02em; }
+.rp-logo {
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+  background: #18181b; color: #fff; font-size: 13px; font-weight: 800; letter-spacing: -.02em; flex: none;
+}
+.rp-brand-app { margin-left: auto; color: #a1a1aa; font-weight: 500; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.rp-cover-main { padding: 60px 0 10px; border-top: 4px solid var(--c); }
+.rp-cover-main h1 { margin: 10px 0 14px; font-size: 40px; line-height: 1.1; letter-spacing: -.035em; }
+.rp-status { display: inline-block; padding: 3px 12px; border-radius: 999px; border: 1.5px solid var(--c); color: var(--c); font-size: 12px; font-weight: 700; }
+.rp-cover-main .rp-desc { margin-top: 18px; font-size: 15px; color: #3f3f46; }
+.rp-kv { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rp-kv th { width: 42%; text-align: left; font-weight: 500; color: #71717a; padding: 6px 10px 6px 0; border-bottom: 1px solid #e4e4e7; vertical-align: top; }
+.rp-kv td { padding: 6px 0; border-bottom: 1px solid #e4e4e7; font-weight: 600; color: #18181b; overflow-wrap: anywhere; }
+.rp-kv code { font-size: 11px; font-weight: 500; }
+.rp-cover-kv { margin-top: auto; }
+.rp-toc { padding: 16px 18px; border-radius: 10px; background: #f4f4f5; }
+.rp-toc-title { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #71717a; margin-bottom: 6px; }
+.rp-toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 28px; font-size: 13px; font-weight: 550; }
+.rp-sec-num { display: inline-block; min-width: 28px; color: #a1a1aa; }
+.rp-break { break-before: page; page-break-before: always; }
+.rp-section h3 small { font-weight: 400; color: #a1a1aa; }
+.rp-dates { margin: -2px 0 8px; font-size: 11.5px; color: #71717a; }
+.rp-outline li.off { color: #a1a1aa; text-decoration: line-through; }
+.rp-files { margin-top: 12px; }
+.rp-files-title { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: #a1a1aa; margin-bottom: 6px; }
+.rp-file-card { border: 1px solid #e4e4e7; border-radius: 10px; margin: 8px 0; overflow: hidden; break-inside: avoid-page; }
+.rp-file-card.has-body { break-inside: auto; }
+.rp-file-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: #fafafa; border-bottom: 1px solid #e4e4e7; font-size: 12.5px; }
+.rp-file-card:not(.has-body) .rp-file-head { border-bottom: 0; }
+.rp-file-head span:last-child { color: #71717a; font-size: 11.5px; }
+.rp-file-tag { padding: 1px 6px; border-radius: 5px; background: var(--fc); color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 700; }
+.rp-file-body { padding: 10px 12px; }
+.rp-figure img { display: block; max-width: 100%; max-height: 900px; margin: 0 auto; border-radius: 6px; }
+.rp-page { margin: 0 0 12px; break-inside: avoid; }
+.rp-page img { display: block; width: 100%; border: 1px solid #e4e4e7; border-radius: 4px; }
+.rp-page figcaption { margin-top: 4px; font-size: 10.5px; color: #71717a; text-align: center; }
+.rp-pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: #18181b; }
+.rp-note { margin: 6px 0 0; font-size: 12px; color: #71717a; font-style: italic; }
+.rp-sheet-name { margin: 8px 0 4px; font-size: 12px; font-weight: 650; color: #3f3f46; }
+.rp-docx img { max-width: 100%; }
+.rp-meta-sec { break-before: page; page-break-before: always; }
+.rp-sign { display: flex; align-items: center; gap: 12px; margin-top: 28px; padding-top: 16px; border-top: 2px solid #18181b; }
+.rp-sign b { display: block; font-size: 15px; }
+.rp-sign span { font-size: 12px; color: #71717a; }
+
+/* Код в отчёте — светлый, чтобы хорошо печатался */
+.paper .md pre, .paper .md pre[class*='language-'] { background: #f6f6f7 !important; border: 1px solid #e4e4e7 !important; }
+.paper .md pre code { color: #18181b !important; text-shadow: none !important; font-size: 11.5px; }
+.paper .token.comment, .paper .token.prolog { color: #71717a !important; font-style: italic; }
+.paper .token.keyword, .paper .token.tag, .paper .token.boolean { color: #7c3aed !important; }
+.paper .token.string, .paper .token.attr-value { color: #15803d !important; }
+.paper .token.number, .paper .token.constant { color: #b45309 !important; }
+.paper .token.function, .paper .token.class-name, .paper .token.attr-name { color: #1d4ed8 !important; }
+.paper .token.punctuation, .paper .token.operator { color: #3f3f46 !important; }
+
+/* --- Чёрно-белый режим: только чёрный, без полутонов в тексте --- */
+.paper.mono, .paper.mono .md, .paper.mono .rp-kv th, .paper.mono .rp-kv td, .paper.mono .rp-dates,
+.paper.mono .rp-entry-date, .paper.mono .rp-legend, .paper.mono .rp-kpi span, .paper.mono .rp-meta,
+.paper.mono .rp-file-head span:last-child, .paper.mono .rp-note, .paper.mono .rp-files-title,
+.paper.mono .rp-sec-num, .paper.mono .rp-toc-title, .paper.mono .rp-brand-app, .paper.mono .rp-sign span,
+.paper.mono .rp-outline li span, .paper.mono figcaption, .paper.mono .rp-muted { color: #000 !important; }
+.paper.mono .token { color: #000 !important; }
+.paper.mono .token.keyword, .paper.mono .token.tag { font-weight: 700; }
+.paper.mono .token.comment { font-style: italic; }
+.paper.mono img { filter: grayscale(1) contrast(1.2); }
+.paper.mono .rp-kpi { background: #fff; border: 1.5px solid #000; }
+.paper.mono .rp-toc { background: #fff; border: 1.5px solid #000; }
+.paper.mono .rp-file-card, .paper.mono .rp-file-head, .paper.mono .rp-kv th, .paper.mono .rp-kv td,
+.paper.mono .rp-table th, .paper.mono .rp-table td, .paper.mono .rp-section h2, .paper.mono .md th,
+.paper.mono .md td, .paper.mono .md .table-wrap, .paper.mono .rp-block, .paper.mono .rp-entry,
+.paper.mono .rp-page img { border-color: #000 !important; }
+.paper.mono .rp-file-head, .paper.mono .rp-table th, .paper.mono .md th { background: #fff !important; }
+.paper.mono .rp-table th, .paper.mono .md th { border-bottom-width: 2px !important; }
+.paper.mono .md a { color: #000; text-decoration: underline; }
+.paper.mono .md code { background: #fff; border-color: #000; }
+.paper.mono .md pre, .paper.mono .md pre[class*='language-'] { background: #fff !important; border: 1.5px solid #000 !important; }
+.paper.mono .md blockquote { border-left-color: #000; color: #000; }
+.paper.mono .rp-cover-main { border-top-color: #000; }
+.paper.mono .rp-status { border-color: #000; color: #000; }
+.paper.mono .rp-logo { background: #000; }
+.paper.mono .md .cb { border-color: #000; }
+.paper.mono .md li.on .cb { background: #000; border-color: #000; }
+.paper.mono .html-embed { border-color: #000; }
+
+/* --- Просмотрщик: инструменты --- */
+.viewer-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* --- Диалог выбора --- */
+.choice-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; }
+.choice-list .choice { height: auto; min-height: 44px; padding: 8px 14px; flex-direction: column; align-items: flex-start; gap: 1px; white-space: normal; text-align: left; }
+.choice-list .choice small { font-weight: 400; font-size: 12px; opacity: .75; }
+
+/* --- Опасные действия в настройках проекта --- */
+.danger-zone { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+.danger-zone summary { cursor: pointer; color: var(--faint); font-size: 13px; }
+.danger-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ps-root-hint { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+
+/* --- Редактор пометок --- */
+.annot {
+  position: fixed; inset: 0; z-index: 180;
+  display: flex; flex-direction: column;
+  background: #0b0b0d; color: #f4f4f5;
+  opacity: 0; transition: opacity .25s var(--ease);
+}
+.annot.open { opacity: 1; }
+.annot-bar { display: flex; align-items: center; gap: 10px; padding: calc(10px + var(--safe-t)) 14px 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.annot-bar .btn.ghost { color: #d4d4d8; }
+.annot-bar .btn.primary { background: #fafafa; color: #09090b; }
+.annot-title { flex: 1; min-width: 0; text-align: center; font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.annot-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 16px; overflow: hidden;
+  background-image: linear-gradient(45deg, #151518 25%, transparent 25%), linear-gradient(-45deg, #151518 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #151518 75%), linear-gradient(-45deg, transparent 75%, #151518 75%);
+  background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0; }
+.annot-canvas { max-width: 100%; max-height: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.6); border-radius: 4px; touch-action: none; cursor: crosshair; background: #fff; }
+.annot-canvas[data-tool='text'] { cursor: text; }
+.annot-tools { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px calc(12px + var(--safe-b)); border-top: 1px solid rgba(255,255,255,.08); background: #111114; }
+.annot-group { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(255,255,255,.05); }
+.annot .tool { color: #a1a1aa; }
+.annot .tool:hover { background: rgba(255,255,255,.1); color: #fff; }
+.annot .tool.active { background: #fafafa; color: #09090b; }
+.annot .tool:disabled { opacity: .3; pointer-events: none; }
+.annot-color { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); background: var(--ac); padding: 0; transition: transform .2s var(--spring); }
+.annot-color.active { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 0 2px #0b0b0d, 0 0 0 4px var(--ac); }
+.annot-size { width: 90px; accent-color: #fafafa; }
+.annot-crop { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #d4d4d8; }
+
+@media (max-width: 720px) {
+  .report-title { display: none; }
+  #reportCompose { order: 2; }
+  .report-bar #reportMode { order: 1; }
+  .report-panel { position: absolute; inset: 0; width: auto; z-index: 3; border-left: 0; }
+  .rp-cover-page { min-height: 0; }
+  .rp-cover-main { padding-top: 30px; }
+  .rp-cover-main h1 { font-size: 30px; }
+  .rp-toc ol { columns: 1; }
+  .annot-tools { gap: 6px; }
+  .annot-size { width: 70px; }
+}
+@media screen {
+  .paper .rp-break, .paper .rp-meta-sec { margin-top: 44px; padding-top: 34px; border-top: 1px dashed #d4d4d8; }
+}
+/* Разрывы страниц: шапка файла не отрывается от содержимого, страницы PDF влезают на лист */
+.rp-file-head { break-after: avoid; page-break-after: avoid; }
+.rp-figure img { max-height: 190mm; width: auto; }
+.rp-page img { width: auto; max-width: 100%; max-height: 225mm; margin: 0 auto; }
+.rp-block h3, .rp-entry-date, .rp-dates { break-after: avoid; page-break-after: avoid; }
+.paper.mono .html-embed iframe { filter: grayscale(1) contrast(1.2); }
