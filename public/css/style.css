@@ -2247,3 +2247,82 @@ button.crumb:hover { background: var(--surface-2); color: var(--text); }
 @media (max-width: 380px) {
   .tabs button { font-size: 11.5px; }
 }
+
+/* ---------- Связи-стрелки ---------- */
+.tree-edges marker path { animation: none; stroke: none; }
+.tree-edges .arrow-head { fill: var(--accent); }
+.tree-edges path.xlink {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-dasharray: 6 5;
+  opacity: .9;
+  animation: dashFlow 1.2s linear infinite, fadeIn .5s var(--ease) both;
+}
+.xlink-label {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+@keyframes dashFlow { to { stroke-dashoffset: -22; } }
+@media (prefers-reduced-motion: reduce) { .tree-edges path.xlink { animation: none; } }
+
+.tree-ctrl .icon-btn.active { background: var(--accent); color: var(--accent-fg); }
+.tree-wrap.connecting { cursor: crosshair; }
+.tree-wrap.connecting .tnode { cursor: crosshair; }
+.tree-wrap.connecting .tnode:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+.tree-wrap.connecting .tnode-add, .tree-wrap.connecting .tnode-fold { pointer-events: none; opacity: .3; }
+.tnode.link-src { box-shadow: 0 0 0 3px var(--accent), 0 0 0 8px var(--ring) !important; animation: none; }
+.tree-banner {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  cursor: default;
+  animation: toastIn .35s var(--spring) both;
+}
+.tree-banner .muted { color: color-mix(in srgb, var(--bg) 60%, transparent); }
+
+.xl-list { display: flex; flex-direction: column; gap: 6px; }
+.xl-row, .xl-add { display: flex; align-items: center; gap: 6px; }
+.xl-row { padding: 4px 4px 4px 10px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.xl-dir { color: var(--accent); font-weight: 700; width: 14px; text-align: center; flex: none; }
+[data-accent='mono'] .xl-dir { color: var(--text); }
+.xl-target { flex: none; max-width: 40%; border: 0; background: transparent; font-weight: 600; font-size: 13.5px; padding: 4px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xl-target:hover { color: var(--accent); }
+.xl-label { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 13px; outline: 0; }
+.xl-label:focus { border-color: var(--border-strong); background: var(--surface); color: var(--text); }
+.xl-add { margin-top: 4px; padding-left: 10px; }
+.xl-select { flex: 1; min-width: 0; height: 34px; padding: 0 10px; font-size: 13.5px; }
+
+.rp-links { margin: 0; padding-left: 18px; font-size: 13px; columns: 2; column-gap: 32px; }
+.rp-links li { break-inside: avoid; margin: 2px 0; }
+.rp-links i { color: #71717a; }
+
+/* ---------- JSON ---------- */
+.view-actions { display: flex; gap: 8px; align-items: center; }
+.json-tabs { margin-bottom: 16px; }
+.json-text { min-height: 320px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; white-space: pre; tab-size: 2; margin-bottom: 12px; }
+.json-mode { margin-bottom: 12px; }
+.status { margin-top: 10px; font-size: 13px; color: var(--muted); min-height: 1em; }
+.status.err { color: var(--red); }
+.status.ok { color: var(--green); }
+@media (max-width: 720px) {
+  .view-actions #projImport span { display: none; }
+  .json-text { min-height: 240px; }
+  .rp-links { columns: 1; }
+}
