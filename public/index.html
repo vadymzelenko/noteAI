@@ -310,12 +310,30 @@
     <button class="btn ghost" id="reportClose">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>Назад
     </button>
-    <div class="report-opts" id="reportOpts"></div>
+    <div class="report-title">Отчёт</div>
+    <div class="seg seg-sm" id="reportMode" role="radiogroup" aria-label="Режим печати">
+      <span class="seg-indicator" aria-hidden="true"></span>
+      <button type="button" data-mode="color" class="active">Цвет</button>
+      <button type="button" data-mode="mono">Ч/Б</button>
+    </div>
+    <button class="btn" id="reportCompose" title="Что включить в отчёт">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>Состав
+    </button>
     <button class="btn primary" id="reportPrint">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Печать / PDF
     </button>
   </div>
-  <div class="report-scroll"><div class="paper" id="reportPaper"></div></div>
+  <div class="report-main">
+    <div class="report-scroll" id="reportScroll"><div class="paper" id="reportPaper"></div></div>
+    <aside class="report-panel" id="reportPanel" hidden>
+      <div class="rpp-head"><b>Состав отчёта</b>
+        <button class="icon-btn sm" id="reportPanelClose" title="Закрыть" aria-label="Закрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="rpp-body" id="reportPanelBody"></div>
+    </aside>
+  </div>
 </div>
 
 <!-- ================= Проект: JSON ================= -->
@@ -352,6 +370,8 @@
 <script src="/js/links.js"></script>
 <script src="/js/app.js"></script>
 <script src="/js/projects.js"></script>
+<script src="/js/annotate.js"></script>
+<script src="/js/report.js"></script>
 
 </body>
 </html>

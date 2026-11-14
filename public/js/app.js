@@ -362,6 +362,38 @@
     });
   }
 
+  // Диалог с несколькими вариантами. Возвращает id выбранного варианта или null.
+  function askChoice({ title, message = '', choices = [] }) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay confirm-overlay';
+      overlay.setAttribute('role', 'alertdialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.innerHTML = `
+        <div class="modal modal-xs confirm">
+          <div class="confirm-title">${escapeHtml(title)}</div>
+          ${message ? `<div class="confirm-msg">${escapeHtml(message)}</div>` : ''}
+          <div class="choice-list">
+            ${choices.map((c, i) => `<button class="btn ${c.danger ? 'danger-solid' : i === 0 ? 'primary' : ''} choice" data-choice="${escapeHtml(c.id)}" type="button">
+              <span>${escapeHtml(c.label)}</span>${c.hint ? `<small>${escapeHtml(c.hint)}</small>` : ''}</button>`).join('')}
+            <button class="btn ghost" data-choice="" type="button">Отмена</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('open'));
+      const done = (val) => {
+        overlay.classList.remove('open');
+        document.removeEventListener('keydown', onKey, true);
+        setTimeout(() => overlay.remove(), 240);
+        resolve(val || null);
+      };
+      const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+      document.addEventListener('keydown', onKey, true);
+      overlay.querySelectorAll('[data-choice]').forEach((b) => b.addEventListener('click', () => done(b.dataset.choice)));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+    });
+  }
+
   function askText({ title, value = '', placeholder = '', actionText = 'Сохранить', extraText = '' }) {
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
@@ -2249,7 +2281,7 @@
   window.NF = {
     $, svgIcon, ICONS, escapeHtml, uid, plural, fmtTime, fmtHuman, startOfDay, pad2,
     renderBody, plainPreview, highlightCode, renderTable,
-    toast, askConfirm, askText, openOverlay, closeOverlay, closeHooks, topOverlay,
+    toast, askConfirm, askText, askChoice, openOverlay, closeOverlay, closeHooks, topOverlay,
     toolbarHtml, applyFormat, onBodyKeydown, setMode, moveIndicator,
     render: () => render(),
     get mode() { return state.mode; },

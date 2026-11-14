@@ -13,7 +13,7 @@
   'use strict';
 
   const NF = window.NF;
-  const { $, svgIcon, escapeHtml, uid, plural, fmtHuman, fmtTime, startOfDay, pad2, renderBody, plainPreview, toast, askConfirm, askText } = NF;
+  const { $, svgIcon, escapeHtml, uid, plural, fmtHuman, fmtTime, startOfDay, pad2, renderBody, plainPreview, toast, askConfirm, askText, askChoice } = NF;
 
   const CAT = { project: '__nf_project', block: '__nf_block', entry: '__nf_entry', file: '__nf_file' };
   const COLORS = ['#3b82f6', '#f97316', '#8b5cf6', '#16a34a', '#ec4899', '#eab308', '#06b6d4', '#ef4444'];
@@ -131,7 +131,7 @@
     switch (it.category) {
       case CAT.project: {
         const d = parseJson(it.body, {});
-        return ['project', { ...base, desc: d.desc || '', color: d.color || COLORS[0], status: STATUS[d.status] ? d.status : 'active', activity: d.activity && typeof d.activity === 'object' ? d.activity : {}, links: Array.isArray(d.links) ? d.links.filter((l) => l && l.from && l.to) : [] }];
+        return ['project', { ...base, desc: d.desc || '', color: d.color || COLORS[0], status: STATUS[d.status] ? d.status : 'active', activity: d.activity && typeof d.activity === 'object' ? d.activity : {}, links: Array.isArray(d.links) ? d.links.filter((l) => l && l.from && l.to) : [], report: d.report && typeof d.report === 'object' ? d.report : {} }];
       }
       case CAT.block: {
         const d = parseJson(it.body, {});
@@ -155,7 +155,7 @@
       id: o.id, type: 'note', title: o.title || '', category: CAT[kind], tags: [], done: false, font: 'sans', importance: 'green',
       createdAt: o.createdAt, updatedAt: o.updatedAt, deleted: !!o.deleted, deletedAt: o.deletedAt || null, body: '',
     };
-    if (kind === 'project') it.body = JSON.stringify({ desc: o.desc, color: o.color, status: o.status, activity: o.activity, links: o.links || [] });
+    if (kind === 'project') it.body = JSON.stringify({ desc: o.desc, color: o.color, status: o.status, activity: o.activity, links: o.links || [], report: o.report || {} });
     if (kind === 'block') it.body = JSON.stringify({ p: o.p, parent: o.parent, content: o.content, color: o.color, collapsed: o.collapsed });
     if (kind === 'entry') it.body = JSON.stringify({ p: o.p, block: o.block, text: o.text });
     if (kind === 'file') { it.title = o.name; it.tags = [`p:${o.p}`, `o:${o.owner}`, `m:${o.mime}`, `s:${o.size}`]; }
@@ -333,6 +333,17 @@
     try { await DB.deleteMany([...set]); } catch (e) { console.error('[projects] delete', e); toast('Не удалось удалить на сервере', 'err'); }
   }
 
+  // Удалить все блоки проекта (файлы блоков переезжают в материалы проекта).
+  async function clearTree(pid) {
+    const ids = blocksOf(pid).map((b) => b.id);
+    const set = new Set(ids);
+    for (const f of S.files.filter((x) => set.has(x.owner))) await moveFile(f, pid);
+    const p = proj(pid);
+    p.links = [];
+    save('project', p);
+    await hardDelete(ids);
+  }
+
   async function deleteProject(id) {
     const p = proj(id);
     if (!p) return;
@@ -426,6 +437,33 @@
     if (added) { track(p); toast(added === 1 ? 'Файл добавлен' : `Добавлено файлов: ${added}`, 'ok', 2000); }
   }
 
+  // Загрузка уже готового data:-URL (пометки на картинке, страницы PDF и т.п.).
+  async function uploadData({ p, owner, name, mime, data }) {
+    const now = Date.now();
+    const f = { id: uid(), p, owner, name, mime, size: Math.round((data.length - data.indexOf(',') - 1) * 0.75), createdAt: now, updatedAt: now, uploading: true };
+    S.files.push(f);
+    fileCache.set(f.id, data);
+    refreshFileViews();
+    try {
+      await DB.putItem({ ...toItem('file', f), body: data });
+      f.uploading = false;
+      track(p);
+    } catch (e) {
+      S.files = S.files.filter((x) => x.id !== f.id);
+      fileCache.delete(f.id);
+      refreshFileViews();
+      throw e;
+    }
+    refreshFileViews();
+    return f;
+  }
+
+  // Перепривязать файл к другому владельцу (без перезаливки содержимого).
+  async function moveFile(f, owner) {
+    f.owner = owner;
+    try { await DB.updateTags(f.id, toItem('file', f).tags); } catch (e) { console.error('[projects] move file', e); }
+  }
+
   async function getData(f) {
     if (fileCache.has(f.id)) return fileCache.get(f.id);
     const d = await DB.fileData(f.id);
@@ -462,7 +500,7 @@
         </span>
         <span class="file-info">
           <span class="file-name">${escapeHtml(f.name)}</span>
-          <span class="file-sub">${fmtSize(f.size)}${where ? ' · ' + escapeHtml(where) : ''}</span>
+          <span class="file-sub" title="Добавлен ${escapeHtml(fmtTime(f.createdAt))}">${fmtSize(f.size)} · ${escapeHtml(fmtHuman(f.createdAt, false))}${where ? ' · ' + escapeHtml(where) : ''}</span>
         </span>
       </button>`;
   }
@@ -539,8 +577,26 @@
 
     const e = extOf(f.name);
     try {
-      if (kind === 'image') body.innerHTML = `<div class="viewer-img"><img src="${escapeHtml(data)}" alt="${escapeHtml(f.name)}"></div>`;
-      else if (kind === 'pdf') body.innerHTML = `<iframe class="viewer-frame" src="${url()}" title="${escapeHtml(f.name)}"></iframe>`;
+      if (kind === 'image') {
+        body.innerHTML = `
+          <div class="viewer-tools">
+            <button class="btn sm primary" id="vDraw">${svgIcon('edit', 15)}Рисовать и подписывать</button>
+            <span class="muted small-text">Сохранится копией с пометками — оригинал останется</span>
+          </div>
+          <div class="viewer-img"><img src="${escapeHtml(data)}" alt="${escapeHtml(f.name)}"></div>`;
+        $('vDraw').addEventListener('click', () => annotateFile(f, data));
+      } else if (kind === 'pdf') {
+        body.innerHTML = `
+          <div class="viewer-tools">
+            <button class="btn sm primary" id="vPdfDraw">${svgIcon('edit', 15)}Рисовать на странице…</button>
+            <button class="btn sm" id="vPdfSplit">${svgIcon('image', 15)}Разбить на картинки…</button>
+            <span class="muted small-text" id="vPdfInfo"></span>
+          </div>
+          <iframe class="viewer-frame" src="${url()}" title="${escapeHtml(f.name)}"></iframe>`;
+        pdfPageCount(f).then((n) => { const el = $('vPdfInfo'); if (el && n) el.textContent = `${n} ${plural(n, 'страница', 'страницы', 'страниц')}`; }).catch(() => {});
+        $('vPdfDraw').addEventListener('click', () => annotatePdfPage(f));
+        $('vPdfSplit').addEventListener('click', () => splitPdf(f));
+      }
       else if (kind === 'video') body.innerHTML = `<video class="viewer-media" src="${url()}" controls></video>`;
       else if (kind === 'audio') body.innerHTML = `<audio class="viewer-audio" src="${url()}" controls></audio>`;
       else if (kind === 'md') body.innerHTML = `<div class="md viewer-doc">${renderBody(dataUrlText(data))}</div>`;
@@ -562,7 +618,7 @@
       else if (e === 'csv' || e === 'tsv') body.innerHTML = `<div class="md">${csvTable(dataUrlText(data), e === 'tsv' ? '\t' : null)}</div>`;
       else if (kind === 'sheet') {
         body.innerHTML = '<div class="viewer-loading"><span class="file-spin"></span>Открываю таблицу…</div>';
-        await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js');
+        await loadScript('/vendor/xlsx-0.18.5.full.min.js');
         const wb = XLSX.read(dataUrlBytes(data), { type: 'array' });
         body.innerHTML = wb.SheetNames.map((n) => {
           const rows = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, blankrows: false }).slice(0, 500);
@@ -570,7 +626,7 @@
         }).join('');
       } else if (e === 'docx') {
         body.innerHTML = '<div class="viewer-loading"><span class="file-spin"></span>Открываю документ…</div>';
-        await loadScript('https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js');
+        await loadScript('/vendor/mammoth-1.8.0.browser.min.js');
         const res = await mammoth.convertToHtml({ arrayBuffer: dataUrlBytes(data).buffer });
         body.innerHTML = `<div class="md viewer-doc">${sanitizeHtml(res.value)}</div>`;
       } else {
@@ -625,6 +681,108 @@
     const w = Math.max(...rows.map((r) => r.length));
     const cell = (c) => escapeHtml(c == null ? '' : String(c));
     return `<div class="table-wrap"><table><thead><tr>${Array.from({ length: w }, (_, i) => `<th>${cell(rows[0][i])}</th>`).join('')}</tr></thead><tbody>${rows.slice(1).map((r) => `<tr>${Array.from({ length: w }, (_, i) => `<td>${cell(r[i])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+
+  /* --- PDF: рендер страниц (pdf.js, локальная копия в /vendor) --- */
+  const pdfDocs = new Map();     // fileId → Promise<PDFDocumentProxy>
+  const pdfPages = new Map();    // `${fileId}:${n}` → data:-URL
+
+  async function pdfDoc(f) {
+    if (!pdfDocs.has(f.id)) {
+      pdfDocs.set(f.id, (async () => {
+        await loadScript('/vendor/pdf-3.11.174.min.js');
+        const lib = window.pdfjsLib;
+        lib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker-3.11.174.min.js';
+        const data = await getData(f);
+        return lib.getDocument({ data: dataUrlBytes(data) }).promise;
+      })().catch((e) => { pdfDocs.delete(f.id); throw e; }));
+    }
+    return pdfDocs.get(f.id);
+  }
+
+  async function pdfPageCount(f) { return (await pdfDoc(f)).numPages; }
+
+  async function pdfPageImage(f, n, { scale = 1.8, type = 'image/jpeg' } = {}) {
+    const key = `${f.id}:${n}:${scale}`;
+    if (pdfPages.has(key)) return pdfPages.get(key);
+    const doc = await pdfDoc(f);
+    const page = await doc.getPage(n);
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas');
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const url = c.toDataURL(type, 0.9);
+    pdfPages.set(key, url);
+    return url;
+  }
+
+  // «1-3, 5, 8-» → [1,2,3,5,8,...max]
+  function parsePages(spec, max) {
+    const t = String(spec || '').trim().toLowerCase();
+    if (!t || t === 'все' || t === 'all' || t === '*') return Array.from({ length: max }, (_, i) => i + 1);
+    const out = new Set();
+    t.split(/[,;\s]+/).forEach((part) => {
+      const m = part.match(/^(\d+)?\s*-\s*(\d+)?$/);
+      if (m) {
+        const a = Math.max(1, +(m[1] || 1)), b = Math.min(max, +(m[2] || max));
+        for (let i = a; i <= b; i++) out.add(i);
+      } else if (/^\d+$/.test(part)) { const n = +part; if (n >= 1 && n <= max) out.add(n); }
+    });
+    return [...out].sort((a, b) => a - b);
+  }
+
+  const baseName = (name) => String(name).replace(/\.[^.]+$/, '');
+
+  async function annotateFile(f, data, { page, open: openAfter = true } = {}) {
+    if (!window.Annotator) return null;
+    const res = await Annotator.open({ src: data, title: f.name + (page ? ` — стр. ${page}` : '') });
+    if (!res) return null;
+    try {
+      const nf = await uploadData({ p: f.p, owner: f.owner, name: `${baseName(f.name)}${page ? ` — стр. ${page}` : ''} (пометки).${res.ext}`, mime: res.mime, data: res.dataUrl });
+      // Оригинал скрываем из отчёта — в отчёт пойдёт версия с пометками.
+      if (!page) {
+        const pr = proj(f.p);
+        pr.report = pr.report || {};
+        pr.report.exclude = [...new Set([...(pr.report.exclude || []), f.id])];
+        save('project', pr);
+      }
+      toast(page ? 'Страница с пометками сохранена' : 'Сохранено копией с пометками. Оригинал скрыт из отчёта (вернуть — «Состав» в отчёте)', 'ok', 4500);
+      if (openAfter) { NF.closeOverlay('fileOverlay'); openFile(nf); }
+      return nf;
+    } catch (e) { toast('Не удалось сохранить: ' + (e.message || 'ошибка сети'), 'err', 5000); return null; }
+  }
+
+  async function annotatePdfPage(f, { open: openAfter = true } = {}) {
+    let n;
+    try { n = await pdfPageCount(f); } catch (e) { toast('Не удалось открыть PDF', 'err'); return null; }
+    const ans = n === 1 ? '1' : await askText({ title: `Страница (1–${n})`, value: '1', actionText: 'Открыть' });
+    if (!ans || typeof ans !== 'string') return null;
+    const page = parseInt(ans, 10);
+    if (!(page >= 1 && page <= n)) { toast('Нет такой страницы', 'err'); return null; }
+    const img = await pdfPageImage(f, page, { scale: 2 });
+    return annotateFile(f, img, { page, open: openAfter });
+  }
+
+  async function splitPdf(f) {
+    let n;
+    try { n = await pdfPageCount(f); } catch (e) { toast('Не удалось открыть PDF', 'err'); return; }
+    const ans = await askText({ title: `Какие страницы сделать картинками? (всего ${n})`, value: n <= 10 ? 'все' : '1-5', placeholder: 'все, 1-3, 5', actionText: 'Разбить' });
+    if (!ans || typeof ans !== 'string') return;
+    const pages = parsePages(ans, n);
+    if (!pages.length) { toast('Не понял номера страниц', 'err'); return; }
+    if (pages.length > 40) { toast('Не больше 40 страниц за раз', 'err'); return; }
+    toast(`Разбиваю: ${pages.length} ${plural(pages.length, 'страница', 'страницы', 'страниц')}…`, 'info', 2500);
+    let ok = 0;
+    for (const pg of pages) {
+      try {
+        const img = await pdfPageImage(f, pg, { scale: 1.8 });
+        await uploadData({ p: f.p, owner: f.owner, name: `${baseName(f.name)} — стр. ${pg}.jpg`, mime: 'image/jpeg', data: img });
+        ok++;
+      } catch (e) { console.error('[pdf split]', e); }
+    }
+    toast(`Готово: ${ok} ${plural(ok, 'картинка', 'картинки', 'картинок')}`, ok ? 'ok' : 'err');
   }
 
   /* ====================== СТАТИСТИКА ====================== */
@@ -963,8 +1121,9 @@
   }
 
   /* --- Настройки проекта --- */
-  function openSettings(pid, focusDesc) {
+  function openSettings(pid, focusDesc, { fromTree = false } = {}) {
     const p = proj(pid);
+    const nb = blocksOf(pid).length;
     const body = $('projBody');
     body.innerHTML = `
       <label class="field"><span class="field-label">Название</span>
@@ -976,9 +1135,16 @@
       <div class="field"><span class="field-label">Статус</span>
         <div class="chips wrap">${Object.entries(STATUS).map(([k, v]) => `<button type="button" class="chip ${p.status === k ? 'active' : ''}" data-ps="${k}">${v}</button>`).join('')}</div></div>
       <div class="ps-foot">
-        <span class="muted">Создан ${escapeHtml(fmtDate(p.createdAt))}</span>
-        <button class="btn ghost danger" id="psDelete">${svgIcon('trash', 15)}Удалить проект</button>
-      </div>`;
+        <span class="muted">Создан ${escapeHtml(fmtTime(p.createdAt))} · изменён ${escapeHtml(fmtTime(p.updatedAt))}</span>
+      </div>
+      ${fromTree ? `<p class="hint ps-root-hint">Это главный блок — сам проект. Его нельзя удалить из дерева: удаляются только ветки.</p>` : `
+      <details class="danger-zone">
+        <summary>Опасные действия</summary>
+        <div class="danger-actions">
+          ${nb ? `<button class="btn ghost danger" id="psClear">${svgIcon('tree', 15)}Очистить дерево (${nb} ${plural(nb, 'блок', 'блока', 'блоков')})</button>` : ''}
+          <button class="btn ghost danger" id="psDelete">${svgIcon('trash', 15)}Удалить весь проект</button>
+        </div>
+      </details>`}`;
     NF.openOverlay('projOverlay');
     const upd = (patch) => { Object.assign(p, patch); save('project', p); rerenderSoon(); };
     $('psTitle').addEventListener('input', (e) => upd({ title: e.target.value.trim() || 'Без названия' }));
@@ -991,10 +1157,21 @@
       body.querySelectorAll('[data-ps]').forEach((x) => x.classList.toggle('active', x === b));
       upd({ status: b.dataset.ps });
     }));
-    $('psDelete').addEventListener('click', async () => {
-      if (!(await askConfirm({ title: `Удалить «${p.title}»?`, message: 'Проект со всеми блоками, записями и файлами уйдёт в корзину на 14 дней.' }))) return;
+    const del = $('psDelete');
+    if (del) del.addEventListener('click', async () => {
+      const st = stats(pid);
+      if (!(await askConfirm({ title: `Удалить весь проект «${p.title}»?`, message: `Вместе с ним в корзину уйдут ${st.blocks} ${plural(st.blocks, 'блок', 'блока', 'блоков')}, ${st.entries} ${plural(st.entries, 'запись', 'записи', 'записей')} и ${st.files} ${plural(st.files, 'файл', 'файла', 'файлов')}. Восстановить можно 14 дней.`, actionText: 'Удалить проект' }))) return;
       NF.closeOverlay('projOverlay');
       deleteProject(pid);
+    });
+    const clr = $('psClear');
+    if (clr) clr.addEventListener('click', async () => {
+      if (!(await askConfirm({ title: 'Очистить дерево?', message: `Удалятся все блоки (${nb}) и связи. Файлы блоков перейдут в «Материалы проекта», записи журнала останутся.`, actionText: 'Очистить' }))) return;
+      await clearTree(pid);
+      NF.closeOverlay('projOverlay');
+      views.delete(pid);
+      NF.render();
+      toast('Дерево очищено', 'info');
     });
     setTimeout(() => (focusDesc ? $('psDesc') : $('psTitle')).focus(), 60);
   }
@@ -1346,7 +1523,7 @@
       return;
     }
     if (node) {
-      if (node.dataset.node === 'root') openSettings(openId);
+      if (node.dataset.node === 'root') openSettings(openId, false, { fromTree: true });
       else openRec('block', node.dataset.node);
     }
   }
@@ -1408,6 +1585,7 @@
   function renderRecMeta() {
     const o = recObj();
     const el = $('recMeta');
+    const dates = `<span class="rec-date" title="Изменён ${escapeHtml(fmtTime(o.updatedAt))}">${svgIcon('clock', 14)}создан ${escapeHtml(fmtTime(o.createdAt))}</span>`;
     if (rec.kind === 'block') {
       const blocks = blocksOf(o.p);
       const banned = new Set([o.id, ...descendants(o.id).map((b) => b.id)]);
@@ -1420,7 +1598,8 @@
         </div>
         <label class="pill-field parent-pick" title="Перенести в другую ветку">
           ${svgIcon('tree', 15)}<select id="recParent" aria-label="Родительский блок">${options.join('')}</select>
-        </label>`;
+        </label>
+        ${dates}`;
       el.querySelectorAll('[data-bc]').forEach((b) => b.addEventListener('click', () => {
         o.color = b.dataset.bc;
         el.querySelectorAll('[data-bc]').forEach((x) => x.classList.toggle('active', x === b));
@@ -1572,10 +1751,29 @@
       const parts = [];
       if (sub.length) parts.push(`${sub.length} ${plural(sub.length, 'подблок', 'подблока', 'подблоков')}`);
       if (nf) parts.push(`${nf} ${plural(nf, 'файл', 'файла', 'файлов')}`);
-      if (!(await askConfirm({ title: `Удалить «${o.title || 'блок'}»?`, message: parts.length ? `Вместе с ним удалятся ${parts.join(' и ')}.` : 'Блок будет удалён навсегда.' }))) return;
+      const own = filesOwned(o.id).length;
+      let how;
+      if (sub.length) {
+        how = await askChoice({
+          title: `Удалить «${o.title || 'блок'}»?`,
+          message: `У блока ${sub.length} ${plural(sub.length, 'подблок', 'подблока', 'подблоков')}.`,
+          choices: [
+            { id: 'keep', label: 'Только этот блок', hint: 'подблоки поднимутся на уровень выше' },
+            { id: 'all', label: 'Вместе с подблоками', hint: parts.join(' и ') + ' будут удалены', danger: true },
+          ],
+        });
+      } else {
+        how = (await askConfirm({ title: `Удалить «${o.title || 'блок'}»?`, message: own ? `Вместе с ним удалятся ${own} ${plural(own, 'файл', 'файла', 'файлов')}.` : 'Блок будет удалён навсегда.' })) ? 'all' : null;
+      }
+      if (!how) return;
       NF.closeOverlay('recOverlay');
       rec.id = null;
-      await hardDelete([o.id, ...sub.map((b) => b.id)]);
+      if (how === 'keep') {
+        S.blocks.filter((b) => b.parent === o.id).forEach((b) => { b.parent = o.parent || null; save('block', b); });
+        await hardDelete([o.id]);
+      } else {
+        await hardDelete([o.id, ...sub.map((b) => b.id)]);
+      }
     } else {
       if (!(await askConfirm({ title: 'Удалить запись?', message: filesOwned(o.id).length ? 'Прикреплённые файлы тоже удалятся.' : 'Запись будет удалена навсегда.' }))) return;
       NF.closeOverlay('recOverlay');
@@ -1625,67 +1823,7 @@
   }
 
   /* ====================== ОТЧЁТ ====================== */
-
-  const reportOpts = { stats: true, tree: true, blocks: true, entries: true, files: true, images: true };
-  let reportPid = null;
-
-  async function openReport(pid) {
-    reportPid = pid;
-    await flush();
-    const opts = $('reportOpts');
-    const labels = { stats: 'Статистика', tree: 'Дерево', blocks: 'Блоки', entries: 'Записи', files: 'Список файлов', images: 'Картинки' };
-    opts.innerHTML = Object.entries(labels).map(([k, v]) => `<label class="opt"><input type="checkbox" data-opt="${k}" ${reportOpts[k] ? 'checked' : ''}><span>${v}</span></label>`).join('');
-    opts.querySelectorAll('[data-opt]').forEach((c) => c.addEventListener('change', () => { reportOpts[c.dataset.opt] = c.checked; buildReport(); }));
-    NF.openOverlay('reportOverlay');
-    $('reportOverlay').scrollTop = 0;
-    buildReport();
-  }
-
-  function closeReport() {
-    NF.closeOverlay('reportOverlay');
-    reportPid = null;
-  }
-
-  async function buildReport() {
-    const pid = reportPid;
-    const paper = $('reportPaper');
-    if (!pid) return;
-    const images = filesOf(pid).filter((f) => fileKind(f) === 'image');
-    if (reportOpts.images && images.some((f) => !fileCache.has(f.id))) {
-      paper.innerHTML = '<div class="viewer-loading"><span class="file-spin"></span>Загружаю изображения для отчёта…</div>';
-      await Promise.all(images.map((f) => getData(f).catch(() => null)));
-      if (pid !== reportPid) return;
-    }
-    paper.innerHTML = reportHtml(pid);
-  }
-
-  function reportTreeSvg(pid) {
-    const L = layout(pid, { ignoreCollapsed: true });
-    const { W, H } = TREE;
-    const P = 10;
-    const wrapText = (t, max) => {
-      const ws = String(t || '').split(/\s+/);
-      const lines = [''];
-      ws.forEach((w) => {
-        const cur = lines[lines.length - 1];
-        if ((cur + ' ' + w).trim().length > max && cur) lines.push(w); else lines[lines.length - 1] = (cur + ' ' + w).trim();
-      });
-      if (lines.length > 2) { lines.length = 2; lines[1] = lines[1].slice(0, max - 1) + '…'; }
-      return lines.map((l) => (l.length > max ? l.slice(0, max - 1) + '…' : l));
-    };
-    const nodes = L.nodes.map((n) => {
-      const lines = wrapText(n.isRoot ? n.title : n.block.title || 'Без названия', 24);
-      const ty = n.y + H / 2 - (lines.length - 1) * 9 + 5;
-      return `<g>
-        <rect x="${n.x}" y="${n.y + 6}" width="${W}" height="${H - 12}" rx="12" fill="${n.isRoot ? n.color : '#ffffff'}" stroke="${n.color}" stroke-width="${n.isRoot ? 0 : 2}"/>
-        ${n.isRoot ? '' : `<rect x="${n.x}" y="${n.y + 6}" width="6" height="${H - 12}" rx="3" fill="${n.color}"/>`}
-        ${lines.map((l, i) => `<text x="${n.x + W / 2}" y="${ty + i * 18}" text-anchor="middle" font-size="14" font-weight="${n.isRoot ? 700 : 600}" fill="${n.isRoot ? '#ffffff' : '#18181b'}">${escapeHtml(l)}</text>`).join('')}
-      </g>`;
-    }).join('');
-    const edges = L.edges.map((e) => `<path d="${edgePath(e)}" fill="none" stroke="${e.color}" stroke-width="2" opacity=".7"/>`).join('');
-    const defs = '<defs><marker id="rpArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#71717a"/></marker></defs>';
-    return `<svg class="rp-tree" viewBox="${-P} ${-P} ${L.width + P * 2 + 120} ${L.height + P * 2}" xmlns="http://www.w3.org/2000/svg" font-family="Geist, Inter, Arial, sans-serif">${defs}${edges}${nodes}${linksSvg(pid, L, { report: true })}</svg>`;
-  }
+  // Сам отчёт собирается в report.js — здесь только порядок блоков для него.
 
   // Блоки в порядке обхода дерева с нумерацией 1, 1.1, 1.2…
   function orderedBlocks(pid) {
@@ -1708,146 +1846,7 @@
     return out;
   }
 
-  function reportFiles(files) {
-    if (!files.length) return '';
-    const imgs = reportOpts.images ? files.filter((f) => fileKind(f) === 'image' && fileCache.has(f.id)) : [];
-    const rest = files.filter((f) => !imgs.includes(f));
-    return `
-      ${imgs.length ? `<div class="rp-images">${imgs.map((f) => `<figure><img src="${escapeHtml(fileCache.get(f.id))}" alt=""><figcaption>${escapeHtml(f.name)}</figcaption></figure>`).join('')}</div>` : ''}
-      ${rest.length ? `<div class="rp-attach">${rest.map((f) => `<span class="rp-file"><b style="color:${KIND_COLOR[fileKind(f)]}">${tagOf(f)}</b>${escapeHtml(f.name)} <i>${fmtSize(f.size)}</i></span>`).join('')}</div>` : ''}`;
-  }
-
-  function reportHtml(pid) {
-    const p = proj(pid);
-    const st = stats(pid);
-    const o = reportOpts;
-    const parts = [];
-
-    parts.push(`
-      <header class="rp-cover" style="--c:${p.color}">
-        <div class="rp-kicker">Отчёт по проекту</div>
-        <h1>${escapeHtml(p.title)}</h1>
-        <div class="rp-meta">
-          <span>Статус: <b>${STATUS[p.status]}</b></span>
-          <span>Начат: <b>${fmtDate(p.createdAt)}</b></span>
-          <span>Последняя активность: <b>${fmtDate(st.last)}</b></span>
-          <span>Отчёт от ${fmtDate(Date.now())}</span>
-        </div>
-        ${p.desc ? `<div class="md rp-desc">${renderBody(p.desc)}</div>` : ''}
-      </header>`);
-
-    if (o.stats) {
-      const ser = series(pid, 30);
-      const max = Math.max(...ser.map((s) => s.v), 1);
-      const W = 640, H = 120, bw = W / ser.length;
-      const bars = ser.map((s, i) => {
-        const h = s.v / max * (H - 24);
-        const d = new Date(s.ts);
-        return `<rect x="${(i * bw + 2).toFixed(1)}" y="${(H - 18 - h).toFixed(1)}" width="${(bw - 4).toFixed(1)}" height="${Math.max(h, 1.5).toFixed(1)}" rx="2" fill="${s.v ? p.color : '#e4e4e7'}"/>` +
-          (i % 5 === 0 ? `<text x="${(i * bw + bw / 2).toFixed(1)}" y="${H - 4}" font-size="9" text-anchor="middle" fill="#71717a">${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}</text>` : '');
-      }).join('');
-      const kinds = Object.entries(st.byKind).sort((a, b) => b[1] - a[1]);
-      const totalF = kinds.reduce((s, k) => s + k[1], 0) || 1;
-      parts.push(`
-        <section class="rp-section">
-          <h2>Статистика</h2>
-          <div class="rp-kpis">
-            ${[
-              [st.blocks, plural(st.blocks, 'блок', 'блока', 'блоков')],
-              [st.depth, 'уровней дерева'],
-              [st.entries, plural(st.entries, 'запись', 'записи', 'записей')],
-              [st.files, `${plural(st.files, 'файл', 'файла', 'файлов')} · ${fmtSize(st.size)}`],
-              [st.words, plural(st.words, 'слово', 'слова', 'слов')],
-              [st.days, plural(st.days, 'день работы', 'дня работы', 'дней работы')],
-              [fmtDuration(st.minutes), 'примерно в работе'],
-              [st.span, plural(st.span, 'день с начала', 'дня с начала', 'дней с начала')],
-            ].map(([v, k]) => `<div class="rp-kpi"><b>${v}</b><span>${k}</span></div>`).join('')}
-          </div>
-          <h3>Активность за 30 дней</h3>
-          <svg class="rp-chart" viewBox="0 0 ${W} ${H}">${bars}</svg>
-          ${kinds.length ? `
-            <h3>Файлы по типам</h3>
-            <div class="rp-stack">${kinds.map(([k, n]) => `<span style="flex:${n};background:${KIND_COLOR[k]}"></span>`).join('')}</div>
-            <div class="rp-legend">${kinds.map(([k, n]) => `<span><i style="background:${KIND_COLOR[k]}"></i>${KIND_LABEL[k]} — ${n} (${Math.round(n / totalF * 100)}%)</span>`).join('')}</div>` : ''}
-        </section>`);
-    }
-
-    const ob = orderedBlocks(pid);
-    if (o.tree && ob.length) {
-      parts.push(`
-        <section class="rp-section rp-tree-sec">
-          <h2>Структура проекта</h2>
-          ${reportTreeSvg(pid)}
-          <ol class="rp-outline">${ob.map(({ b, num, depth }) => `<li style="--d:${depth}"><span>${num}</span>${escapeHtml(b.title || 'Без названия')}</li>`).join('')}</ol>
-          ${linksOf(pid).length ? `<h3>Связи между блоками</h3><ul class="rp-links">${linksOf(pid).map((l) => `<li>${escapeHtml(nodeTitle(pid, l.from))} <b>→</b> ${escapeHtml(nodeTitle(pid, l.to))}${l.label ? ` <i>— ${escapeHtml(l.label)}</i>` : ''}</li>`).join('')}</ul>` : ''}
-        </section>`);
-    }
-
-    if (o.blocks && ob.length) {
-      parts.push(`
-        <section class="rp-section">
-          <h2>Блоки</h2>
-          ${ob.map(({ b, num, depth }) => {
-            const files = filesOwned(b.id);
-            const empty = !b.content.trim() && !files.length;
-            return `<article class="rp-block" style="--d:${depth}">
-              <h3><span class="rp-num">${num}</span>${escapeHtml(b.title || 'Без названия')}</h3>
-              ${b.content.trim() ? `<div class="md">${renderBody(b.content)}</div>` : ''}
-              ${o.files || o.images ? reportFiles(files) : ''}
-              ${empty ? '<p class="rp-muted">Пока без описания</p>' : ''}
-            </article>`;
-          }).join('')}
-        </section>`);
-    }
-
-    const es = entriesOf(pid).sort((a, b) => a.createdAt - b.createdAt);
-    if (o.entries && es.length) {
-      parts.push(`
-        <section class="rp-section">
-          <h2>Журнал записей</h2>
-          ${es.map((e) => {
-            const b = e.block && block(e.block);
-            return `<article class="rp-entry">
-              <div class="rp-entry-date">${escapeHtml(fmtTime(e.createdAt))}${b ? ` · ${escapeHtml(b.title)}` : ''}</div>
-              ${e.title ? `<h4>${escapeHtml(e.title)}</h4>` : ''}
-              ${e.text ? `<div class="md">${renderBody(e.text)}</div>` : ''}
-              ${o.files || o.images ? reportFiles(filesOwned(e.id)) : ''}
-            </article>`;
-          }).join('')}
-        </section>`);
-    }
-
-    const pf = filesOf(pid).filter((f) => f.owner === pid);
-    if ((o.files || o.images) && pf.length) {
-      parts.push(`<section class="rp-section"><h2>Материалы проекта</h2>${reportFiles(pf)}</section>`);
-    }
-
-    const all = filesOf(pid).sort((a, b) => a.createdAt - b.createdAt);
-    if (o.files && all.length) {
-      parts.push(`
-        <section class="rp-section">
-          <h2>Приложения</h2>
-          <table class="rp-table"><thead><tr><th>№</th><th>Файл</th><th>Тип</th><th>Размер</th><th>Где</th><th>Добавлен</th></tr></thead>
-          <tbody>${all.map((f, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(f.name)}</td><td>${KIND_LABEL[fileKind(f)]}</td><td>${fmtSize(f.size)}</td><td>${escapeHtml(ownerLabel(f))}</td><td>${fmtDate(f.createdAt)}</td></tr>`).join('')}</tbody></table>
-        </section>`);
-    }
-
-    parts.push(`<footer class="rp-foot">NodeFlow · ${escapeHtml(p.title)} · ${fmtTime(Date.now())}</footer>`);
-    return parts.join('');
-  }
-
-  function printReport() {
-    document.body.classList.add('printing-report');
-    const done = () => { document.body.classList.remove('printing-report'); window.removeEventListener('afterprint', done); };
-    window.addEventListener('afterprint', done);
-    setTimeout(() => { window.print(); setTimeout(done, 1000); }, 50);
-  }
-
-  function bindReport() {
-    $('reportClose').addEventListener('click', closeReport);
-    $('reportPrint').addEventListener('click', printReport);
-    NF.closeHooks.reportOverlay = closeReport;
-  }
+  const openReport = (pid) => flush().then(() => window.Report && Report.open(pid));
 
   /* ====================== JSON: ЭКСПОРТ / ИМПОРТ ======================
      Формат описан в README («Формат JSON проекта»). Он рассчитан на то,
@@ -1900,7 +1899,9 @@
   }
 
   // into — id существующего проекта (блоки добавятся к корню) или null (новый проект).
-  function importJson(data, into) {
+  // mode: 'new' — новый проект; 'into' — добавить блоки в проект into;
+  // 'replace' — заменить дерево проекта into (блоки и связи) содержимым JSON.
+  async function importJson(data, into, mode = into ? 'into' : 'new') {
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
       if (Array.isArray(data)) data = { blocks: data };
       else throw new Error('Ожидается JSON-объект проекта');
@@ -1908,8 +1909,16 @@
     const blocksIn = data.blocks || data.children || data.tree || data.nodes || [];
     if (!Array.isArray(blocksIn)) throw new Error('Поле "blocks" должно быть массивом');
     let p;
-    if (into) p = proj(into);
-    else {
+    if (into) {
+      p = proj(into);
+      if (mode === 'replace') {
+        await clearTree(p.id);
+        if (data.title || data.name) p.title = String(data.title || data.name).slice(0, 200);
+        if (data.description != null || data.desc != null) p.desc = String(data.description ?? data.desc ?? '');
+        if (isHex(data.color)) p.color = data.color.trim();
+        if (STATUS[data.status]) p.status = data.status;
+      }
+    } else {
       p = createProject(String(data.title || data.name || 'Импортированный проект').slice(0, 200));
       p.desc = String(data.description || data.desc || '');
       if (isHex(data.color)) p.color = data.color.trim();
@@ -1984,6 +1993,8 @@
       const text = typeof e === 'string' ? e : String(e?.text ?? e?.content ?? '');
       if (!text.trim() && !(e && e.title)) return;
       const ts = (e && Date.parse(e.date)) || (now - 50000 + i);
+      // Повторный импорт того же JSON не дублирует записи журнала.
+      if (S.entries.some((x) => x.p === p.id && x.text === text && Math.abs(x.createdAt - ts) < 60000)) return;
       const ne = { id: uid(), p: p.id, block: (e && resolve(e.block)) === 'root' ? null : (e && resolve(e.block)) || null, title: String((e && e.title) || ''), text, createdAt: ts, updatedAt: now };
       S.entries.push(ne);
       save('entry', ne, { touch: false });
@@ -2036,8 +2047,9 @@
         <p class="hint">Вставь JSON проекта — например, сгенерированный ИИ — или выбери файл. Формат: <code>title</code>, <code>blocks</code> с вложенными <code>children</code>, <code>links</code> (<code>from</code> → <code>to</code>) и <code>entries</code>.</p>
         <textarea class="input textarea json-text" id="jsonIn" spellcheck="false" placeholder='{ "title": "Мой проект", "blocks": [ { "id": "a", "title": "Идея", "children": [ { "title": "Шаг 1" } ] } ], "links": [] }'></textarea>
         ${p ? `<div class="chips wrap json-mode">
-          <button class="chip active" data-jm="into">Добавить в «${escapeHtml(p.title)}»</button>
-          <button class="chip" data-jm="new">Создать новый проект</button>
+          <button class="chip active" data-jm="replace" title="Блоки и связи проекта будут заменены; записи и файлы останутся">Заменить дерево</button>
+          <button class="chip" data-jm="into">Добавить к дереву</button>
+          <button class="chip" data-jm="new">Новый проект</button>
         </div>` : ''}
         <div class="row-actions">
           <button class="btn primary" id="jsonImport">Импортировать</button>
@@ -2048,7 +2060,7 @@
       </div>`;
     NF.openOverlay('jsonOverlay');
 
-    let mode = p ? 'into' : 'new';
+    let mode = p ? 'replace' : 'new';
     const tabs = $('jsonTabs');
     if (tabs) {
       requestAnimationFrame(() => NF.moveIndicator && NF.moveIndicator(tabs));
@@ -2087,7 +2099,7 @@
       };
       input.click();
     });
-    $('jsonImport').addEventListener('click', () => {
+    $('jsonImport').addEventListener('click', async () => {
       let raw = $('jsonIn').value.trim();
       if (!raw) { status('Вставь JSON', 'err'); return; }
       // ИИ часто оборачивает ответ в ```json … ``` — снимаем обёртку.
@@ -2095,8 +2107,12 @@
       let data;
       try { data = JSON.parse(raw); }
       catch (e) { status('Это не JSON: ' + e.message, 'err'); return; }
+      if (mode === 'replace' && p && blocksOf(p.id).length) {
+        const n = blocksOf(p.id).length;
+        if (!(await askConfirm({ title: 'Заменить дерево?', message: `Текущие ${n} ${plural(n, 'блок', 'блока', 'блоков')} и связи удалятся и будут заменены блоками из JSON. Файлы блоков перейдут в «Материалы проекта», записи журнала останутся.`, actionText: 'Заменить' }))) return;
+      }
       try {
-        const res = importJson(data, mode === 'into' && p ? p.id : null);
+        const res = await importJson(data, mode !== 'new' && p ? p.id : null, mode);
         NF.closeOverlay('jsonOverlay');
         toast(`Импортировано: ${res.blocks} ${plural(res.blocks, 'блок', 'блока', 'блоков')}, ${res.links} ${plural(res.links, 'связь', 'связи', 'связей')}, ${res.entries} ${plural(res.entries, 'запись', 'записи', 'записей')}`, 'ok', 4000);
         if (openId === res.p.id) { views.delete(res.p.id); NF.render(); }
@@ -2132,12 +2148,22 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     bindRec();
-    bindReport();
   });
 
   window.Projects = {
     ingest, reset, render, open, close, createDialog, addAction, onEscape,
     trashed, restore, purge,
+    get openId() { return openId; },
+  };
+
+  // Внутренние функции для report.js / annotate.js.
+  window.Projects._ = {
+    S, proj, block, entry, fileById, blocksOf, entriesOf, filesOf, filesOwned,
+    stats, series, layout, edgePath, linksOf, linksSvg, nodeTitle, orderedBlocks, TREE, COLORS, STATUS,
+    fileKind, tagOf, extOf, KIND_COLOR, KIND_LABEL, CODE_LANG, ownerLabel,
+    getData, dataUrlText, dataUrlBytes, loadScript, pdfPageCount, pdfPageImage, parsePages,
+    rowsTable, csvTable, sanitizeHtml, prettyJson, fmtSize, fmtDate, fmtDuration, words,
+    save, annotateFile, annotatePdfPage, fileCache,
     get openId() { return openId; },
   };
 })();

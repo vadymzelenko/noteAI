@@ -1,6 +1,6 @@
 // NodeFlow service worker — офлайн-кэш оболочки.
 
-const CACHE_VERSION = 'nodeflow-v18';
+const CACHE_VERSION = 'nodeflow-v19';
 const SHELL_FILES = [
     '/',
     '/index.html',
@@ -12,6 +12,8 @@ const SHELL_FILES = [
     '/js/links.js',
     '/js/app.js',
     '/js/projects.js',
+    '/js/annotate.js',
+    '/js/report.js',
     '/icons/icon.svg',
     '/icons/maskable.svg',
     'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
