@@ -2250,7 +2250,7 @@
     $, svgIcon, ICONS, escapeHtml, uid, plural, fmtTime, fmtHuman, startOfDay, pad2,
     renderBody, plainPreview, highlightCode, renderTable,
     toast, askConfirm, askText, openOverlay, closeOverlay, closeHooks, topOverlay,
-    toolbarHtml, applyFormat, onBodyKeydown, setMode,
+    toolbarHtml, applyFormat, onBodyKeydown, setMode, moveIndicator,
     render: () => render(),
     get mode() { return state.mode; },
     get items() { return state.items; },

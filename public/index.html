@@ -255,6 +255,10 @@
         <div class="rec-sec-head"><span>Файлы</span><button class="btn sm" id="recAttach">+ Файл</button></div>
         <div class="file-grid compact" id="recFiles"></div>
       </section>
+      <section class="rec-section" id="recLinksSec">
+        <div class="rec-sec-head"><span>Связи-стрелки</span></div>
+        <div class="xl-list" id="recLinks"></div>
+      </section>
       <section class="rec-section" id="recKidsSec">
         <div class="rec-sec-head"><span>Подблоки</span><button class="btn sm" id="recAddKid">+ Подблок</button></div>
         <div class="kid-list" id="recKids"></div>
@@ -312,6 +316,17 @@
     </button>
   </div>
   <div class="report-scroll"><div class="paper" id="reportPaper"></div></div>
+</div>
+
+<!-- ================= Проект: JSON ================= -->
+<div class="modal-overlay" id="jsonOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-label="JSON проекта">
+  <div class="modal modal-lg">
+    <header class="modal-head">
+      <h2 class="modal-title">JSON проекта</h2>
+      <button class="icon-btn" data-close title="Закрыть" aria-label="Закрыть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </header>
+    <div class="modal-body" id="jsonBody"></div>
+  </div>
 </div>
 
 <input type="file" id="projFileInput" multiple hidden>

@@ -131,7 +131,7 @@
     switch (it.category) {
       case CAT.project: {
         const d = parseJson(it.body, {});
-        return ['project', { ...base, desc: d.desc || '', color: d.color || COLORS[0], status: STATUS[d.status] ? d.status : 'active', activity: d.activity && typeof d.activity === 'object' ? d.activity : {} }];
+        return ['project', { ...base, desc: d.desc || '', color: d.color || COLORS[0], status: STATUS[d.status] ? d.status : 'active', activity: d.activity && typeof d.activity === 'object' ? d.activity : {}, links: Array.isArray(d.links) ? d.links.filter((l) => l && l.from && l.to) : [] }];
       }
       case CAT.block: {
         const d = parseJson(it.body, {});
@@ -155,7 +155,7 @@
       id: o.id, type: 'note', title: o.title || '', category: CAT[kind], tags: [], done: false, font: 'sans', importance: 'green',
       createdAt: o.createdAt, updatedAt: o.updatedAt, deleted: !!o.deleted, deletedAt: o.deletedAt || null, body: '',
     };
-    if (kind === 'project') it.body = JSON.stringify({ desc: o.desc, color: o.color, status: o.status, activity: o.activity });
+    if (kind === 'project') it.body = JSON.stringify({ desc: o.desc, color: o.color, status: o.status, activity: o.activity, links: o.links || [] });
     if (kind === 'block') it.body = JSON.stringify({ p: o.p, parent: o.parent, content: o.content, color: o.color, collapsed: o.collapsed });
     if (kind === 'entry') it.body = JSON.stringify({ p: o.p, block: o.block, text: o.text });
     if (kind === 'file') { it.title = o.name; it.tags = [`p:${o.p}`, `o:${o.owner}`, `m:${o.mime}`, `s:${o.size}`]; }
@@ -279,7 +279,7 @@
   /* --- Создание / удаление --- */
   function createProject(title) {
     const now = Date.now();
-    const p = { id: uid(), title, desc: '', color: COLORS[S.projects.length % COLORS.length], status: 'active', activity: {}, createdAt: now, updatedAt: now, deleted: false };
+    const p = { id: uid(), title, desc: '', color: COLORS[S.projects.length % COLORS.length], status: 'active', activity: {}, links: [], createdAt: now, updatedAt: now, deleted: false };
     S.projects.push(p);
     track(p.id);
     save('project', p, { delay: 0 });
@@ -323,6 +323,12 @@
     S.files = S.files.filter((f) => !set.has(f.id));
     // Записи, ссылавшиеся на удалённые блоки, остаются — просто без привязки.
     S.entries.forEach((e) => { if (e.block && set.has(e.block)) { e.block = null; save('entry', e); } });
+    // Связи-стрелки, которые вели к удалённым блокам, тоже убираем.
+    S.projects.forEach((p) => {
+      const before = (p.links || []).length;
+      p.links = (p.links || []).filter((l) => !set.has(l.from) && !set.has(l.to));
+      if (p.links.length !== before) save('project', p);
+    });
     set.forEach((id) => { pending.delete(id); localCopies.delete(id); fileCache.delete(id); });
     try { await DB.deleteMany([...set]); } catch (e) { console.error('[projects] delete', e); toast('Не удалось удалить на сервере', 'err'); }
   }
@@ -688,7 +694,10 @@
           <h1 class="view-title">Проекты</h1>
           <div class="view-sub">${n} ${plural(n, 'проект', 'проекта', 'проектов')}</div>
         </div>
-        <button class="btn primary add-btn" id="projNew">${svgIcon('plus', 16, 2.2)}<span>Проект</span></button>
+        <div class="view-actions">
+          <button class="btn" id="projImport" title="Создать проект из JSON">${svgIcon('code', 16)}<span>Импорт JSON</span></button>
+          <button class="btn primary add-btn" id="projNew">${svgIcon('plus', 16, 2.2)}<span>Проект</span></button>
+        </div>
       </div>
       ${n ? `<div class="proj-grid">${list.map(projectCard).join('')}</div>` : `
         <div class="empty proj-empty">
@@ -699,6 +708,7 @@
         </div>`}`;
     root.querySelectorAll('[data-project]').forEach((c) => c.addEventListener('click', () => open(c.dataset.project)));
     ['projNew', 'projNew2'].forEach((id) => { const b = $(id); if (b) b.addEventListener('click', createDialog); });
+    $('projImport').addEventListener('click', () => openJson(null));
   }
 
   function projectCard(p, i) {
@@ -774,6 +784,7 @@
         <div class="proj-actions">
           <button class="btn primary" id="projReport">${svgIcon('report', 16)}Отчёт</button>
           <button class="btn" id="projSettings">${svgIcon('edit', 16)}Изменить</button>
+          <button class="btn" id="projJson" title="Экспорт и импорт JSON">${svgIcon('code', 16)}JSON</button>
         </div>
       </div>
 
@@ -789,6 +800,7 @@
           <div class="tree-ctrl">
             <button class="icon-btn sm" data-tz="out" title="Уменьшить" aria-label="Уменьшить">${svgIcon('minus', 16, 2)}</button>
             <button class="icon-btn sm" data-tz="in" title="Увеличить" aria-label="Увеличить">${svgIcon('plus', 16, 2)}</button>
+            <button class="icon-btn sm" data-tz="link" title="Соединить блоки стрелкой" aria-label="Соединить блоки стрелкой">${svgIcon('link', 16)}</button>
             <button class="icon-btn sm" data-tz="fit" title="Показать всё" aria-label="Показать всё">${svgIcon('fit', 16)}</button>
             <button class="icon-btn sm" data-tz="full" title="На весь экран" aria-label="На весь экран">${svgIcon('expand', 16)}</button>
           </div>
@@ -819,6 +831,7 @@
     $('projBack').addEventListener('click', () => close());
     $('projReport').addEventListener('click', () => openReport(pid));
     $('projSettings').addEventListener('click', () => openSettings(pid));
+    $('projJson').addEventListener('click', () => openJson(pid));
     const da = $('projDescAdd');
     if (da) da.addEventListener('click', () => openSettings(pid, true));
     $('projAddFiles').addEventListener('click', () => pickFiles({ p: pid, owner: pid }));
@@ -992,6 +1005,88 @@
     rerenderTimer = setTimeout(() => { if (NF.mode === 'projects') NF.render(); }, 250);
   }
 
+  /* ====================== СВЯЗИ-СТРЕЛКИ ====================== */
+  // Помимо дерева (родитель → дети) блоки можно соединять произвольными
+  // стрелками. Раскладка от них не меняется — дерево остаётся ровным.
+
+  const nodeTitle = (pid, id) => (id === 'root' ? (proj(pid) || {}).title || 'Проект' : (block(id) || {}).title || 'Без названия');
+  const linksOf = (pid) => ((proj(pid) || {}).links || []);
+
+  function addLink(pid, from, to, label = '') {
+    const p = proj(pid);
+    if (!p || !from || !to || from === to) return null;
+    p.links = p.links || [];
+    if (p.links.some((l) => l.from === from && l.to === to)) { toast('Такая связь уже есть', 'info'); return null; }
+    const l = { id: uid(), from, to, label: String(label || '').slice(0, 120) };
+    p.links.push(l);
+    save('project', p);
+    track(pid);
+    return l;
+  }
+
+  function removeLink(pid, id) {
+    const p = proj(pid);
+    if (!p) return;
+    p.links = (p.links || []).filter((l) => l.id !== id);
+    save('project', p);
+  }
+
+  // Кривая стрелки между двумя узлами раскладки.
+  function linkGeom(a, b) {
+    const { W, H } = TREE;
+    const ay = a.y + H * 0.62, by = b.y + H * 0.38;
+    if (Math.abs(a.x - b.x) < 1) {
+      // Один столбец — петля справа.
+      const x = a.x + W;
+      const dx = 46 + Math.min(110, Math.abs(ay - by) * 0.3);
+      return { d: `M${x},${ay} C${x + dx},${ay} ${x + dx},${by} ${x + 4},${by}`, mx: x + dx * 0.75, my: (ay + by) / 2 };
+    }
+    const fwd = b.x > a.x;
+    const x1 = fwd ? a.x + W : a.x;
+    const x2 = fwd ? b.x - 4 : b.x + W + 4;
+    const dx = Math.max(50, Math.abs(x2 - x1) * 0.45) * (fwd ? 1 : -1);
+    return { d: `M${x1},${ay} C${x1 + dx},${ay} ${x2 - dx},${by} ${x2},${by}`, mx: (x1 + x2) / 2, my: (ay + by) / 2 };
+  }
+
+  function linksSvg(pid, L, { report = false } = {}) {
+    const pos = new Map(L.nodes.map((n) => [n.id, n]));
+    return linksOf(pid).map((l) => {
+      const a = pos.get(l.from), b = pos.get(l.to);
+      if (!a || !b) return '';
+      const g = linkGeom(a, b);
+      const label = l.label ? `<text class="xlink-label" x="${g.mx}" y="${g.my - 6}" text-anchor="middle"${report ? ' font-size="12" fill="#52525b" stroke="#fff" stroke-width="4" paint-order="stroke"' : ''}>${escapeHtml(l.label)}</text>` : '';
+      return report
+        ? `<path d="${g.d}" fill="none" stroke="#71717a" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#rpArrow)"/>${label}`
+        : `<path class="xlink" d="${g.d}" marker-end="url(#nfArrow)"/>${label}`;
+    }).join('');
+  }
+
+  /* --- Режим «соединить стрелкой» в дереве --- */
+  const connect = { on: false, from: null };
+
+  function setConnect(on) {
+    connect.on = !!on;
+    connect.from = null;
+    const wrap = $('treeWrap');
+    if (!wrap) return;
+    wrap.classList.toggle('connecting', connect.on);
+    const b = wrap.querySelector('[data-tz="link"]');
+    if (b) b.classList.toggle('active', connect.on);
+    updateConnectBanner();
+    wrap.querySelectorAll('.link-src').forEach((n) => n.classList.remove('link-src'));
+  }
+
+  function updateConnectBanner() {
+    const wrap = $('treeWrap');
+    if (!wrap) return;
+    let el = wrap.querySelector('.tree-banner');
+    if (!connect.on) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.className = 'tree-banner'; wrap.appendChild(el); }
+    el.innerHTML = connect.from
+      ? `${svgIcon('link', 14, 2)}Теперь выбери, <b>куда</b> ведёт стрелка от «${escapeHtml(nodeTitle(openId, connect.from))}» <span class="muted">· Esc — отмена</span>`
+      : `${svgIcon('link', 14, 2)}Выбери блок, <b>откуда</b> идёт стрелка <span class="muted">· Esc — отмена</span>`;
+  }
+
   /* ====================== ДЕРЕВО МЫСЛЕЙ ====================== */
 
   // Раскладка «аккуратного дерева»: корень слева, ветки вправо.
@@ -1083,10 +1178,16 @@
     st.style.height = (L.height + P * 2) + 'px';
     st.innerHTML = `
       <svg class="tree-edges" width="${L.width + P * 2}" height="${L.height + P * 2}" aria-hidden="true">
+        <defs><marker id="nfArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow-head" d="M0,1 L9,5 L0,9 z"/></marker></defs>
         <g transform="translate(${P},${P})">${L.edges.map((e) => `<path d="${edgePath(e)}" stroke="${e.color}"/>`).join('')}</g>
+        <g class="xlinks" transform="translate(${P},${P})">${linksSvg(openId, L)}</g>
       </svg>
       <div class="tree-nodes" style="transform:translate(${P}px,${P}px)">${L.nodes.map(nodeHtml).join('')}</div>
       ${L.nodes.length === 1 ? `<div class="tree-hint" style="left:${P + TREE.W + 26}px;top:${P + 18}px">${svgIcon('back', 14, 2)}Нажми «+», чтобы добавить первую ветку: например, «Дизайн», «Техническая часть», «Реклама», «Тесты»</div>` : ''}`;
+    if (connect.on && connect.from) {
+      const n = st.querySelector(`[data-node="${connect.from}"]`);
+      if (n) n.classList.add('link-src');
+    }
     if (fit) fitView(); else applyView();
   }
 
@@ -1131,6 +1232,7 @@
     const wrap = $('treeWrap');
     if (!wrap) return;
     fullscreen = false;
+    connect.on = false; connect.from = null;
     const pointers = new Map();
     let start = null, pinch = null, moved = false, downTarget = null;
 
@@ -1201,11 +1303,28 @@
       if (t === 'in') zoomAt(1.2, r.width / 2, r.height / 2);
       else if (t === 'out') zoomAt(1 / 1.2, r.width / 2, r.height / 2);
       else if (t === 'fit') fitView();
+      else if (t === 'link') setConnect(!connect.on);
       else toggleFullscreen();
     }));
   }
 
   async function tap(target) {
+    if (connect.on) {
+      const n = target.closest('[data-node]');
+      if (!n) { setConnect(false); return; }
+      const id = n.dataset.node;
+      if (!connect.from) {
+        connect.from = id;
+        n.classList.add('link-src');
+        updateConnectBanner();
+        return;
+      }
+      if (id === connect.from) { connect.from = null; n.classList.remove('link-src'); updateConnectBanner(); return; }
+      const l = addLink(openId, connect.from, id);
+      setConnect(false);
+      if (l) { drawTree(); toast(`Связь: ${nodeTitle(openId, l.from)} → ${nodeTitle(openId, l.to)}`, 'ok', 2400); }
+      return;
+    }
     const add = target.closest('[data-add]');
     const fold = target.closest('[data-fold]');
     const node = target.closest('[data-node]');
@@ -1251,11 +1370,13 @@
       ? 'Опиши блок: задачи, идеи, решения. Работают списки, таблицы, ```код```, ```html …```'
       : 'Текст записи…';
     $('recKidsSec').hidden = !isBlock;
+    $('recLinksSec').hidden = !isBlock;
     setRecPreview(false);
     renderRecMeta();
     renderCrumbs();
     renderRecFiles();
     renderKids();
+    renderRecLinks();
     updateRecCount();
     setRecSave(o.updatedAt ? 'saved' : 'idle');
     $('recScroll').scrollTop = 0;
@@ -1340,6 +1461,47 @@
       ? kids.map((k) => `<button class="kid" data-kid="${k.id}"><span class="kid-dot" style="background:${k.color || 'var(--faint)'}"></span>${escapeHtml(k.title || 'Без названия')}<span class="kid-n">${S.blocks.filter((b) => b.parent === k.id).length || ''}</span></button>`).join('')
       : '<span class="muted small-text">Подблоков нет</span>';
     el.querySelectorAll('[data-kid]').forEach((b) => b.addEventListener('click', () => openRec('block', b.dataset.kid)));
+  }
+
+  function renderRecLinks() {
+    if (rec.kind !== 'block') return;
+    const o = recObj();
+    const el = $('recLinks');
+    const links = linksOf(o.p).filter((l) => l.from === o.id || l.to === o.id);
+    const rows = links.map((l) => {
+      const out = l.from === o.id;
+      const other = out ? l.to : l.from;
+      return `<div class="xl-row">
+        <span class="xl-dir" title="${out ? 'Исходящая' : 'Входящая'}">${out ? '→' : '←'}</span>
+        <button class="xl-target" data-xlgo="${other}">${escapeHtml(nodeTitle(o.p, other))}</button>
+        <input class="xl-label" data-xllabel="${l.id}" value="${escapeHtml(l.label || '')}" placeholder="подпись, напр. «зависит от»" maxlength="120">
+        <button class="chip-x" data-xlflip="${l.id}" title="Развернуть стрелку" aria-label="Развернуть стрелку">⇄</button>
+        <button class="chip-x" data-xldel="${l.id}" title="Удалить связь" aria-label="Удалить связь">${svgIcon('close', 12, 2.4)}</button>
+      </div>`;
+    }).join('');
+    const options = [o.p === openId || true ? `<option value="root">${escapeHtml(nodeTitle(o.p, 'root'))} (проект)</option>` : '']
+      .concat(blocksOf(o.p).filter((b) => b.id !== o.id).sort((a, b) => a.createdAt - b.createdAt)
+        .map((b) => `<option value="${b.id}">${escapeHtml(b.title || 'Без названия')}</option>`)).join('');
+    el.innerHTML = (rows || '<span class="muted small-text">Связей нет. Стрелки показывают зависимости между любыми блоками, не только по дереву.</span>') +
+      `<div class="xl-add"><span class="xl-dir">→</span><select class="input xl-select" id="recLinkTarget" aria-label="Куда ведёт стрелка">${options}</select><button class="btn sm" id="recLinkAdd">Соединить</button></div>`;
+    el.querySelectorAll('[data-xlgo]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.xlgo === 'root') closeRec(); else openRec('block', b.dataset.xlgo);
+    }));
+    el.querySelectorAll('[data-xllabel]').forEach((inp) => inp.addEventListener('input', () => {
+      const l = linksOf(o.p).find((x) => x.id === inp.dataset.xllabel);
+      if (l) { l.label = inp.value.slice(0, 120); save('project', proj(o.p)); }
+    }));
+    el.querySelectorAll('[data-xlflip]').forEach((b) => b.addEventListener('click', () => {
+      const l = linksOf(o.p).find((x) => x.id === b.dataset.xlflip);
+      if (!l) return;
+      [l.from, l.to] = [l.to, l.from];
+      save('project', proj(o.p));
+      renderRecLinks();
+    }));
+    el.querySelectorAll('[data-xldel]').forEach((b) => b.addEventListener('click', () => { removeLink(o.p, b.dataset.xldel); renderRecLinks(); }));
+    $('recLinkAdd').addEventListener('click', () => {
+      if (addLink(o.p, o.id, $('recLinkTarget').value)) renderRecLinks();
+    });
   }
 
   function setRecSave(s) {
@@ -1521,7 +1683,8 @@
       </g>`;
     }).join('');
     const edges = L.edges.map((e) => `<path d="${edgePath(e)}" fill="none" stroke="${e.color}" stroke-width="2" opacity=".7"/>`).join('');
-    return `<svg class="rp-tree" viewBox="${-P} ${-P} ${L.width + P * 2} ${L.height + P * 2}" xmlns="http://www.w3.org/2000/svg" font-family="Geist, Inter, Arial, sans-serif">${edges}${nodes}</svg>`;
+    const defs = '<defs><marker id="rpArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#71717a"/></marker></defs>';
+    return `<svg class="rp-tree" viewBox="${-P} ${-P} ${L.width + P * 2 + 120} ${L.height + P * 2}" xmlns="http://www.w3.org/2000/svg" font-family="Geist, Inter, Arial, sans-serif">${defs}${edges}${nodes}${linksSvg(pid, L, { report: true })}</svg>`;
   }
 
   // Блоки в порядке обхода дерева с нумерацией 1, 1.1, 1.2…
@@ -1616,6 +1779,7 @@
           <h2>Структура проекта</h2>
           ${reportTreeSvg(pid)}
           <ol class="rp-outline">${ob.map(({ b, num, depth }) => `<li style="--d:${depth}"><span>${num}</span>${escapeHtml(b.title || 'Без названия')}</li>`).join('')}</ol>
+          ${linksOf(pid).length ? `<h3>Связи между блоками</h3><ul class="rp-links">${linksOf(pid).map((l) => `<li>${escapeHtml(nodeTitle(pid, l.from))} <b>→</b> ${escapeHtml(nodeTitle(pid, l.to))}${l.label ? ` <i>— ${escapeHtml(l.label)}</i>` : ''}</li>`).join('')}</ul>` : ''}
         </section>`);
     }
 
@@ -1685,6 +1849,265 @@
     NF.closeHooks.reportOverlay = closeReport;
   }
 
+  /* ====================== JSON: ЭКСПОРТ / ИМПОРТ ======================
+     Формат описан в README («Формат JSON проекта»). Он рассчитан на то,
+     чтобы граф проекта мог написать человек или ИИ: блоки вложены через
+     children, связи ссылаются на id блоков. */
+
+  const isHex = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c.trim());
+
+  function exportJson(pid) {
+    const p = proj(pid);
+    const all = blocksOf(pid);
+    const ids = new Set(all.map((b) => b.id));
+    const ref = new Map([['root', 'root']]);
+    let n = 0;
+    const nest = (parent) => all
+      .filter((b) => (parent === null ? (!b.parent || !ids.has(b.parent)) : b.parent === parent))
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((b) => {
+        const r = 'b' + (++n);
+        ref.set(b.id, r);
+        const o = { id: r, title: b.title };
+        if (b.content) o.content = b.content;
+        if (b.color) o.color = b.color;
+        if (b.collapsed) o.collapsed = true;
+        const kids = nest(b.id);
+        if (kids.length) o.children = kids;
+        return o;
+      });
+    const blocks = nest(null);
+    const owner = (id) => (id === pid ? 'project' : ref.get(id) || (entry(id) ? 'entry' : ''));
+    return {
+      format: 'nodeflow.project',
+      version: 1,
+      title: p.title,
+      description: p.desc || '',
+      color: p.color,
+      status: p.status,
+      exportedAt: new Date().toISOString(),
+      blocks,
+      links: linksOf(pid).filter((l) => ref.has(l.from) && ref.has(l.to))
+        .map((l) => ({ from: ref.get(l.from), to: ref.get(l.to), ...(l.label ? { label: l.label } : {}) })),
+      entries: entriesOf(pid).sort((a, b) => a.createdAt - b.createdAt).map((e) => ({
+        date: new Date(e.createdAt).toISOString(),
+        ...(e.title ? { title: e.title } : {}),
+        text: e.text,
+        ...(e.block && ref.has(e.block) ? { block: ref.get(e.block) } : {}),
+      })),
+      files: filesOf(pid).map((f) => ({ name: f.name, type: f.mime, size: f.size, attachedTo: owner(f.owner) })),
+    };
+  }
+
+  // into — id существующего проекта (блоки добавятся к корню) или null (новый проект).
+  function importJson(data, into) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      if (Array.isArray(data)) data = { blocks: data };
+      else throw new Error('Ожидается JSON-объект проекта');
+    }
+    const blocksIn = data.blocks || data.children || data.tree || data.nodes || [];
+    if (!Array.isArray(blocksIn)) throw new Error('Поле "blocks" должно быть массивом');
+    let p;
+    if (into) p = proj(into);
+    else {
+      p = createProject(String(data.title || data.name || 'Импортированный проект').slice(0, 200));
+      p.desc = String(data.description || data.desc || '');
+      if (isHex(data.color)) p.color = data.color.trim();
+      if (STATUS[data.status]) p.status = data.status;
+    }
+    p.links = p.links || [];
+    const now = Date.now();
+    let seq = 0, count = 0;
+    const idMap = new Map([['root', 'root'], ['project', 'root']]);
+    const byTitle = new Map();
+    const flatParents = [];
+
+    const addBlocks = (list, parentId, depth) => {
+      if (!Array.isArray(list) || depth > 40) return;
+      list.forEach((raw) => {
+        const b = typeof raw === 'string' ? { title: raw } : raw;
+        if (!b || typeof b !== 'object') return;
+        if (count >= 3000) throw new Error('Слишком много блоков (больше 3000)');
+        const nb = {
+          id: uid(), p: p.id, parent: parentId,
+          title: String(b.title ?? b.name ?? b.label ?? 'Без названия').slice(0, 300),
+          content: String(b.content ?? b.text ?? b.description ?? b.body ?? ''),
+          color: isHex(b.color) ? b.color.trim() : '',
+          collapsed: !!b.collapsed,
+          createdAt: now - 100000 + (seq++), updatedAt: now,
+        };
+        S.blocks.push(nb);
+        save('block', nb, { touch: false });
+        count++;
+        if (b.id != null) idMap.set(String(b.id), nb.id);
+        const key = nb.title.trim().toLowerCase();
+        if (!byTitle.has(key)) byTitle.set(key, nb.id);
+        if (b.parent != null && parentId === null) flatParents.push([nb, String(b.parent)]);
+        addBlocks(b.children || b.blocks || b.items, nb.id, depth + 1);
+      });
+    };
+    addBlocks(blocksIn, null, 0);
+
+    const resolve = (x) => {
+      if (x == null || x === '') return null;
+      const k = String(x);
+      return idMap.get(k) || byTitle.get(k.trim().toLowerCase()) || null;
+    };
+    // Плоский формат: { id, parent } без вложенности.
+    flatParents.forEach(([nb, parentRef]) => {
+      const par = resolve(parentRef);
+      if (par && par !== 'root' && par !== nb.id) { nb.parent = par; save('block', nb, { touch: false }); }
+    });
+    // Защита от циклов в плоском формате.
+    S.blocks.filter((b) => b.p === p.id).forEach((b) => {
+      const seen = new Set([b.id]);
+      let cur = b.parent && block(b.parent);
+      while (cur) {
+        if (seen.has(cur.id)) { b.parent = null; save('block', b, { touch: false }); break; }
+        seen.add(cur.id);
+        cur = cur.parent && block(cur.parent);
+      }
+    });
+
+    let links = 0;
+    (data.links || data.edges || data.connections || []).forEach((l) => {
+      if (!l || typeof l !== 'object') return;
+      const from = resolve(l.from ?? l.source), to = resolve(l.to ?? l.target);
+      if (!from || !to || from === to) return;
+      if (p.links.some((x) => x.from === from && x.to === to)) return;
+      p.links.push({ id: uid(), from, to, label: String(l.label || l.title || '').slice(0, 120) });
+      links++;
+    });
+
+    let entries = 0;
+    (data.entries || data.notes || data.journal || []).forEach((e, i) => {
+      const text = typeof e === 'string' ? e : String(e?.text ?? e?.content ?? '');
+      if (!text.trim() && !(e && e.title)) return;
+      const ts = (e && Date.parse(e.date)) || (now - 50000 + i);
+      const ne = { id: uid(), p: p.id, block: (e && resolve(e.block)) === 'root' ? null : (e && resolve(e.block)) || null, title: String((e && e.title) || ''), text, createdAt: ts, updatedAt: now };
+      S.entries.push(ne);
+      save('entry', ne, { touch: false });
+      entries++;
+    });
+
+    save('project', p);
+    track(p.id);
+    if (window.Links) Links.ingest(S.blocks.filter((b) => b.p === p.id).map((b) => b.content).join('\n'));
+    return { p, blocks: count, links, entries };
+  }
+
+  const JSON_EXAMPLE = {
+    format: 'nodeflow.project',
+    version: 1,
+    title: 'Фитнес-приложение',
+    description: 'Мобильное приложение для тренировок.',
+    color: '#3b82f6',
+    blocks: [
+      { id: 'ads', title: 'Реклама', content: '- таргет\n- блогеры', children: [{ id: 'insta', title: 'Instagram' }] },
+      { id: 'tech', title: 'Техническая часть', children: [
+        { id: 'api', title: 'Backend', content: 'API, база данных' },
+        { id: 'app', title: 'Мобильный клиент' },
+      ] },
+      { id: 'design', title: 'Дизайн', children: ['Экран входа', 'Онбординг'] },
+      { id: 'test', title: 'Тестирование' },
+    ],
+    links: [
+      { from: 'design', to: 'app', label: 'макеты для' },
+      { from: 'api', to: 'test', label: 'нужен для' },
+    ],
+    entries: [{ date: '2026-11-14T10:00:00Z', text: 'Старт проекта', block: 'tech' }],
+  };
+
+  function openJson(pid) {
+    const body = $('jsonBody');
+    const p = pid && proj(pid);
+    const exp = p ? JSON.stringify(exportJson(pid), null, 2) : '';
+    body.innerHTML = `
+      ${p ? `<div class="seg seg-sm json-tabs" id="jsonTabs"><span class="seg-indicator" aria-hidden="true"></span><button class="active" data-jt="export">Экспорт</button><button data-jt="import">Импорт</button></div>` : ''}
+      <div class="json-pane" data-pane="export" ${p ? '' : 'hidden'}>
+        <p class="hint">Структура проекта: блоки, связи, записи и список файлов (сами файлы в JSON не входят).</p>
+        <textarea class="input textarea json-text" id="jsonOut" readonly spellcheck="false">${escapeHtml(exp)}</textarea>
+        <div class="row-actions">
+          <button class="btn primary" id="jsonDownload">${svgIcon('download', 15)}Скачать .json</button>
+          <button class="btn" id="jsonCopy">${svgIcon('copy', 15)}Копировать</button>
+        </div>
+      </div>
+      <div class="json-pane" data-pane="import" ${p ? 'hidden' : ''}>
+        <p class="hint">Вставь JSON проекта — например, сгенерированный ИИ — или выбери файл. Формат: <code>title</code>, <code>blocks</code> с вложенными <code>children</code>, <code>links</code> (<code>from</code> → <code>to</code>) и <code>entries</code>.</p>
+        <textarea class="input textarea json-text" id="jsonIn" spellcheck="false" placeholder='{ "title": "Мой проект", "blocks": [ { "id": "a", "title": "Идея", "children": [ { "title": "Шаг 1" } ] } ], "links": [] }'></textarea>
+        ${p ? `<div class="chips wrap json-mode">
+          <button class="chip active" data-jm="into">Добавить в «${escapeHtml(p.title)}»</button>
+          <button class="chip" data-jm="new">Создать новый проект</button>
+        </div>` : ''}
+        <div class="row-actions">
+          <button class="btn primary" id="jsonImport">Импортировать</button>
+          <button class="btn" id="jsonFile">${svgIcon('upload', 15)}Файл…</button>
+          <button class="btn ghost" id="jsonExample">Пример</button>
+        </div>
+        <div class="status" id="jsonStatus"></div>
+      </div>`;
+    NF.openOverlay('jsonOverlay');
+
+    let mode = p ? 'into' : 'new';
+    const tabs = $('jsonTabs');
+    if (tabs) {
+      requestAnimationFrame(() => NF.moveIndicator && NF.moveIndicator(tabs));
+      tabs.querySelectorAll('[data-jt]').forEach((b) => b.addEventListener('click', () => {
+        tabs.querySelectorAll('[data-jt]').forEach((x) => x.classList.toggle('active', x === b));
+        body.querySelectorAll('[data-pane]').forEach((x) => { x.hidden = x.dataset.pane !== b.dataset.jt; });
+        if (NF.moveIndicator) NF.moveIndicator(tabs);
+      }));
+    }
+    body.querySelectorAll('[data-jm]').forEach((b) => b.addEventListener('click', () => {
+      mode = b.dataset.jm;
+      body.querySelectorAll('[data-jm]').forEach((x) => x.classList.toggle('active', x === b));
+    }));
+    if (p) {
+      $('jsonDownload').addEventListener('click', () => {
+        const blob = new Blob([exp], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (p.title || 'project').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80) + '.nodeflow.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      });
+      $('jsonCopy').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(exp); toast('JSON скопирован', 'ok', 1800); }
+        catch { $('jsonOut').select(); toast('Выдели текст и скопируй вручную', 'info'); }
+      });
+    }
+    const status = (t, cls = '') => { const el = $('jsonStatus'); el.textContent = t; el.className = 'status ' + cls; };
+    $('jsonExample').addEventListener('click', () => { $('jsonIn').value = JSON.stringify(JSON_EXAMPLE, null, 2); status(''); });
+    $('jsonFile').addEventListener('click', () => {
+      const input = $('projFileInput');
+      input.value = '';
+      input.onchange = async () => {
+        const f = input.files[0];
+        if (f) { $('jsonIn').value = await f.text(); status(`Загружен ${f.name}`); }
+      };
+      input.click();
+    });
+    $('jsonImport').addEventListener('click', () => {
+      let raw = $('jsonIn').value.trim();
+      if (!raw) { status('Вставь JSON', 'err'); return; }
+      // ИИ часто оборачивает ответ в ```json … ``` — снимаем обёртку.
+      raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      let data;
+      try { data = JSON.parse(raw); }
+      catch (e) { status('Это не JSON: ' + e.message, 'err'); return; }
+      try {
+        const res = importJson(data, mode === 'into' && p ? p.id : null);
+        NF.closeOverlay('jsonOverlay');
+        toast(`Импортировано: ${res.blocks} ${plural(res.blocks, 'блок', 'блока', 'блоков')}, ${res.links} ${plural(res.links, 'связь', 'связи', 'связей')}, ${res.entries} ${plural(res.entries, 'запись', 'записи', 'записей')}`, 'ok', 4000);
+        if (openId === res.p.id) { views.delete(res.p.id); NF.render(); }
+        else { views.delete(res.p.id); open(res.p.id); }
+      } catch (e) {
+        console.error('[json import]', e);
+        status(e.message || 'Не удалось импортировать', 'err');
+      }
+    });
+  }
+
   /* ====================== ПРОЧЕЕ ====================== */
 
   function addAction() {
@@ -1694,6 +2117,7 @@
   }
 
   function onEscape() {
+    if (connect.on) { setConnect(false); return true; }
     if (fullscreen) { toggleFullscreen(false); return true; }
     if (NF.mode === 'projects' && openId) {
       const tag = document.activeElement && document.activeElement.tagName;
