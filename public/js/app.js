@@ -58,6 +58,18 @@
     chart: '<path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7" rx="1"/><rect x="12" y="6" width="3" height="11" rx="1"/><rect x="17" y="13" width="3" height="4" rx="1"/>',
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
     mono: '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>',
+    tree: '<rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="15" y="3" width="6" height="6" rx="1.5"/><rect x="15" y="15" width="6" height="6" rx="1.5"/><path d="M9 6h6"/><path d="M12 6v12h3"/>',
+    clip: '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+    back: '<polyline points="15 18 9 12 15 6"/>',
+    report: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="18" x2="8" y2="14"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="16" y1="18" x2="16" y2="16"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    minus: '<line x1="5" y1="12" x2="19" y2="12"/>',
+    fit: '<path d="M4 9V5a1 1 0 0 1 1-1h4"/><path d="M20 9V5a1 1 0 0 0-1-1h-4"/><path d="M4 15v4a1 1 0 0 0 1 1h4"/><path d="M20 15v4a1 1 0 0 1-1 1h-4"/>',
+    expand: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>',
+    shrink: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    print: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   };
 
@@ -222,6 +234,10 @@
 
     src = src.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, body) => {
       if (lang === 'chart') blocks.push(renderChart((body.match(/-?\d+(?:\.\d+)?/g) || []).map(Number)));
+      else if (lang === 'html') {
+        // HTML показываем как страницу в изолированной «песочнице» (без скриптов) + код под спойлером.
+        blocks.push(`<div class="html-embed"><iframe sandbox="" loading="lazy" title="HTML" srcdoc="${escapeHtml(body)}"></iframe><details><summary>Код HTML</summary>${highlightCode(body.replace(/\n$/, ''), 'html')}</details></div>`);
+      }
       else blocks.push(highlightCode(body.replace(/\n$/, ''), lang));
       return `\n\u0000B${blocks.length - 1}\u0000\n`;
     });
@@ -410,7 +426,10 @@
     try {
       await DB.purgeExpired().catch(() => {});
       const all = await DB.allItems();
-      state.items = all.filter((x) => !SERVICE_IDS.has(x.id)).map(normalizeItem);
+      // Строки проектов (проекты, блоки, записи, файлы) живут в projects.js.
+      const isProjectRow = (x) => String(x.category || '').startsWith('__nf_');
+      if (window.Projects) Projects.ingest(all.filter(isProjectRow));
+      state.items = all.filter((x) => !SERVICE_IDS.has(x.id) && !isProjectRow(x)).map(normalizeItem);
       // Локальные несохранённые правки важнее того, что пришло с сервера.
       pendingSync.forEach((it) => upsertLocal(it));
     } catch (e) {
@@ -538,12 +557,19 @@
     });
     moveIndicator($('modeTabs'));
     const fab = $('fabAdd');
-    if (fab) fab.title = state.mode === 'tasks' ? 'Новая задача' : state.mode === 'notes' ? 'Новая заметка' : 'Добавить ссылку';
+    if (fab) fab.title = { tasks: 'Новая задача', notes: 'Новая заметка', links: 'Добавить ссылку', projects: 'Новый проект' }[state.mode];
   }
 
+  const MODES = ['tasks', 'notes', 'links', 'projects'];
+
   function setMode(mode) {
-    if (!['tasks', 'notes', 'links'].includes(mode)) mode = 'tasks';
-    if (state.mode === mode) return;
+    if (!MODES.includes(mode)) mode = 'tasks';
+    if (state.mode === mode) {
+      // Повторный тап по «Проекты» внутри проекта — возврат к списку.
+      if (mode === 'projects' && window.Projects && Projects.openId) Projects.close();
+      return;
+    }
+    if (mode !== 'projects' && window.Projects && Projects.openId) Projects.close({ silent: true });
     state.mode = mode;
     try { localStorage.setItem('nf.mode', mode); } catch { /* ignore */ }
     state.animateNext = true;
@@ -568,6 +594,7 @@
     }
     if (!state.loaded) { root.innerHTML = renderSkeleton(); return; }
 
+    if (state.mode === 'projects') { Projects.render(root, animate); return; }
     if (state.mode === 'tasks') root.innerHTML = renderTasksView();
     else if (state.mode === 'notes') root.innerHTML = renderNotesView();
     else root.innerHTML = renderLinksView();
@@ -829,21 +856,29 @@
     ],
   ];
 
-  function renderToolbar() {
+  // Текущее поле, к которому применяется форматирование (редактор записи
+  // или редактор блока проекта — см. projects.js).
+  let fmtTA = null;
+
+  function toolbarHtml({ font = true } = {}) {
     const groups = TOOL_GROUPS.map((g) => `<div class="tool-group">${g.map((t) =>
       `<button type="button" class="tool" data-tool="${t.id}" title="${t.label}${t.key ? ' (' + t.key + ')' : ''}" aria-label="${t.label}">${svgIcon(t.icon, 17)}</button>`
     ).join('')}</div>`).join('<span class="tool-sep"></span>');
-    $('editorToolbar').innerHTML = `
+    return `
       <div class="tool-scroll">${groups}</div>
       <div class="tool-group tool-right">
-        <button type="button" class="tool" data-tool="font" title="Моноширинный шрифт" aria-label="Моноширинный шрифт" aria-pressed="false">${svgIcon('mono', 17)}</button>
+        ${font ? `<button type="button" class="tool" data-tool="font" title="Моноширинный шрифт" aria-label="Моноширинный шрифт" aria-pressed="false">${svgIcon('mono', 17)}</button>` : ''}
         <button type="button" class="tool" data-tool="preview" title="Просмотр" aria-label="Просмотр" aria-pressed="false">${svgIcon('eye', 17)}</button>
       </div>`;
   }
 
+  function renderToolbar() {
+    $('editorToolbar').innerHTML = toolbarHtml();
+  }
+
   /* --- Правка текста с сохранением истории «Отменить» (Ctrl+Z) --- */
   function replaceRange(start, end, text, selStart, selEnd) {
-    const ta = editor.bodyEl;
+    const ta = fmtTA;
     ta.focus();
     ta.setSelectionRange(start, end);
     let ok = false;
@@ -857,7 +892,7 @@
   }
 
   function wrapSelection(before, after, placeholder) {
-    const ta = editor.bodyEl;
+    const ta = fmtTA;
     const { selectionStart: a, selectionEnd: b, value: v } = ta;
     // Повторное нажатие снимает форматирование.
     if (v.slice(a - before.length, a) === before && v.slice(b, b + after.length) === after) {
@@ -869,7 +904,7 @@
   }
 
   function lineBounds() {
-    const ta = editor.bodyEl;
+    const ta = fmtTA;
     const v = ta.value;
     let { selectionStart: a, selectionEnd: b } = ta;
     if (b > a && v[b - 1] === '\n') b--;
@@ -893,7 +928,7 @@
   }
 
   function toggleLinePrefix(kind) {
-    const ta = editor.bodyEl;
+    const ta = fmtTA;
     const { ls, le } = lineBounds();
     const lines = ta.value.slice(ls, le).split('\n');
     const nonEmpty = lines.filter((l) => l.trim());
@@ -912,7 +947,7 @@
   }
 
   function toggleHeading() {
-    const ta = editor.bodyEl;
+    const ta = fmtTA;
     const { ls, le } = lineBounds();
     const line = ta.value.slice(ls, le).split('\n')[0];
     const lineEnd = ls + line.length;
@@ -924,7 +959,7 @@
   }
 
   function insertBlock(text, selectFrom, selectLen) {
-    const ta = editor.bodyEl;
+    const ta = fmtTA;
     const { selectionStart: a, selectionEnd: b, value: v } = ta;
     const before = a > 0 && v[a - 1] !== '\n' ? '\n' : '';
     const after = v[b] && v[b] !== '\n' ? '\n' : '';
@@ -937,7 +972,12 @@
     if (id === 'font') { setFont(editor.font === 'mono' ? 'sans' : 'mono'); scheduleSave(); return; }
     if (id === 'preview') { setPreview(!editor.preview); return; }
     if (editor.preview) setPreview(false);
-    const ta = editor.bodyEl;
+    applyFormat(editor.bodyEl, id);
+  }
+
+  // Применяет кнопку панели форматирования к произвольному textarea.
+  function applyFormat(ta, id) {
+    fmtTA = ta;
     const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
     switch (id) {
       case 'heading': toggleHeading(); break;
@@ -968,13 +1008,14 @@
   // Enter внутри списка продолжает его: «7.» → «8.», «- » → «- ».
   // Enter на пустом пункте завершает список.
   function onBodyKeydown(e) {
-    const ta = editor.bodyEl;
+    const ta = e.currentTarget || e.target;
+    fmtTA = ta;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && !e.shiftKey && !e.altKey) {
       const k = e.key.toLowerCase();
-      if (k === 'b' || k === 'и') { e.preventDefault(); applyTool('bold'); return; }
-      if (k === 'i' || k === 'ш') { e.preventDefault(); applyTool('italic'); return; }
-      if (k === 'k' || k === 'л') { e.preventDefault(); e.stopPropagation(); applyTool('link'); return; }
+      if (k === 'b' || k === 'и') { e.preventDefault(); applyFormat(ta, 'bold'); return; }
+      if (k === 'i' || k === 'ш') { e.preventDefault(); applyFormat(ta, 'italic'); return; }
+      if (k === 'k' || k === 'л') { e.preventDefault(); e.stopPropagation(); applyFormat(ta, 'link'); return; }
     }
     if (e.key === 'Tab' && !mod) {
       e.preventDefault();
@@ -1271,6 +1312,7 @@
 
   function addForCurrentMode() {
     if (!Auth.isSignedIn()) { openAccountModal(); return; }
+    if (state.mode === 'projects') { Projects.addAction(); return; }
     if (state.mode === 'links') {
       const inp = $('linkAddInput');
       if (inp) { inp.focus(); inp.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
@@ -1537,11 +1579,14 @@
 
   function bindOverlays() {
     document.querySelectorAll('.modal-overlay').forEach((o) => {
-      if (o.id === 'editorOverlay') return;
+      if (o.id === 'editorOverlay' || o.classList.contains('custom-close')) return;
       o.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closeOverlay(o.id)));
       o.addEventListener('mousedown', (e) => { if (e.target === o) closeOverlay(o.id); });
     });
   }
+
+  // Оверлеи со своей логикой закрытия (например, с автосохранением).
+  const closeHooks = {};
 
   function topOverlay() {
     const open = [...document.querySelectorAll('.modal-overlay.open')];
@@ -1557,7 +1602,7 @@
 
   function renderSettings() {
     const body = $('settingsBody');
-    const trashCount = state.items.filter(isDeleted).length;
+    const trashCount = state.items.filter(isDeleted).length + (window.Projects ? Projects.trashed().length : 0);
     const block = Links.blocklist;
     body.innerHTML = `
       <section class="set-section">
@@ -1732,29 +1777,32 @@
 
   function renderTrashList() {
     const list = $('trashList');
-    const items = state.items.filter(isDeleted).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
+    const projects = window.Projects ? Projects.trashed().map((p) => ({ ...p, isProject: true })) : [];
+    const items = state.items.filter(isDeleted).concat(projects).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0));
     $('trashEmptyBtn').disabled = !items.length;
     if (!items.length) { list.innerHTML = `<div class="empty small">${svgIcon('trash', 24, 1.5)}<div>Корзина пуста</div></div>`; return; }
     list.innerHTML = items.map((it) => {
       const days = Math.max(0, Math.ceil((TRASH_TTL - (Date.now() - (it.deletedAt || 0))) / 86400000));
       return `
         <div class="trash-row">
-          <span class="trash-ico">${svgIcon(it.type === 'task' ? 'task' : 'note', 16)}</span>
+          <span class="trash-ico">${svgIcon(it.isProject ? 'folder' : it.type === 'task' ? 'task' : 'note', 16)}</span>
           <div class="row-body">
-            <div class="row-title">${escapeHtml(it.title || plainPreview(it.body, 60) || 'Без названия')}</div>
+            <div class="row-title">${it.isProject ? 'Проект: ' : ''}${escapeHtml(it.title || plainPreview(it.body, 60) || 'Без названия')}</div>
             <div class="row-desc">удалится через ${days} ${plural(days, 'день', 'дня', 'дней')}</div>
           </div>
-          <button class="btn sm" data-restore="${it.id}">Вернуть</button>
-          <button class="icon-btn sm" data-purge="${it.id}" title="Удалить навсегда" aria-label="Удалить навсегда">${svgIcon('close', 16)}</button>
+          <button class="btn sm" data-restore="${it.id}" ${it.isProject ? 'data-project' : ''}>Вернуть</button>
+          <button class="icon-btn sm" data-purge="${it.id}" ${it.isProject ? 'data-project' : ''} title="Удалить навсегда" aria-label="Удалить навсегда">${svgIcon('close', 16)}</button>
         </div>`;
     }).join('');
     list.querySelectorAll('[data-restore]').forEach((b) => b.addEventListener('click', async () => {
-      await restoreItem(b.dataset.restore);
+      if (b.hasAttribute('data-project')) await Projects.restore(b.dataset.restore);
+      else await restoreItem(b.dataset.restore);
       renderTrashList(); render(); toast('Восстановлено', 'ok');
     }));
     list.querySelectorAll('[data-purge]').forEach((b) => b.addEventListener('click', async () => {
       if (!(await askConfirm({ title: 'Удалить навсегда?', message: 'Это действие нельзя отменить.' }))) return;
-      await purgeItem(b.dataset.purge);
+      if (b.hasAttribute('data-project')) await Projects.purge(b.dataset.purge);
+      else await purgeItem(b.dataset.purge);
       renderTrashList(); render();
     }));
   }
@@ -1762,9 +1810,11 @@
   function bindTrash() {
     $('trashEmptyBtn').addEventListener('click', async () => {
       const all = state.items.filter(isDeleted);
-      if (!all.length) return;
+      const projects = window.Projects ? Projects.trashed() : [];
+      if (!all.length && !projects.length) return;
       if (!(await askConfirm({ title: 'Очистить корзину?', message: `${all.length} ${plural(all.length, 'запись будет удалена', 'записи будут удалены', 'записей будут удалены')} безвозвратно.`, actionText: 'Очистить' }))) return;
       for (const it of all) await purgeItem(it.id);
+      for (const p of projects) await Projects.purge(p.id);
       renderTrashList(); render();
     });
   }
@@ -1963,9 +2013,11 @@
       { icon: 'task', title: 'Новая задача', hint: 'Ctrl+N', run: () => openEditor(null, 'task') },
       { icon: 'note', title: 'Новая заметка', hint: '', run: () => openEditor(null, 'note') },
       { icon: 'link', title: 'Добавить ссылку', hint: '', run: () => { setMode('links'); setTimeout(() => $('linkAddInput')?.focus(), 60); } },
+      { icon: 'folder', title: 'Новый проект', hint: '', run: () => { setMode('projects'); Projects.createDialog(); } },
       { icon: 'task', title: 'Раздел: Задачи', hint: '', run: () => setMode('tasks') },
       { icon: 'note', title: 'Раздел: Заметки', hint: '', run: () => setMode('notes') },
       { icon: 'link', title: 'Раздел: Ссылки', hint: '', run: () => setMode('links') },
+      { icon: 'folder', title: 'Раздел: Проекты', hint: '', run: () => setMode('projects') },
       { icon: 'theme', title: 'Сменить тему', hint: resolvedTheme() === 'dark' ? 'тёмная' : 'светлая', run: toggleTheme },
       { icon: 'metrics', title: 'Аналитика', hint: '', run: openMetrics },
       { icon: 'trash', title: 'Корзина', hint: '', run: openTrash },
@@ -2063,9 +2115,14 @@
       if (e.key === 'Escape') {
         if (document.querySelector('.confirm-overlay')) return;
         const top = topOverlay();
-        if (!top) return;
+        if (!top) {
+          if (window.Projects && Projects.onEscape()) e.preventDefault();
+          return;
+        }
         e.preventDefault();
-        if (top.id === 'editorOverlay') closeEditor(); else closeOverlay(top.id);
+        if (top.id === 'editorOverlay') closeEditor();
+        else if (closeHooks[top.id]) closeHooks[top.id]();
+        else closeOverlay(top.id);
         return;
       }
       if (mod && (k === 'k' || k === 'л')) {
@@ -2111,7 +2168,7 @@
     } catch { /* ignore */ }
     if (!['dark', 'light', 'system'].includes(state.themePref)) state.themePref = 'dark';
     if (!ACCENTS.some((a) => a.id === state.accent)) state.accent = 'mono';
-    if (!['tasks', 'notes', 'links'].includes(state.mode)) state.mode = 'tasks';
+    if (!MODES.includes(state.mode)) state.mode = 'tasks';
     applyTheme();
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => { if (state.themePref === 'system') applyTheme(); });
@@ -2163,6 +2220,7 @@
         Links.loadFromCloud();
       } else {
         state.items = []; state.loaded = false;
+        if (window.Projects) Projects.reset();
       }
       state.animateNext = true;
       render();
@@ -2186,6 +2244,19 @@
       else if (action === 'new-note') openEditor(null, 'note');
     }
   }
+
+  // Общие функции для модуля проектов (projects.js).
+  window.NF = {
+    $, svgIcon, ICONS, escapeHtml, uid, plural, fmtTime, fmtHuman, startOfDay, pad2,
+    renderBody, plainPreview, highlightCode, renderTable,
+    toast, askConfirm, askText, openOverlay, closeOverlay, closeHooks, topOverlay,
+    toolbarHtml, applyFormat, onBodyKeydown, setMode,
+    render: () => render(),
+    get mode() { return state.mode; },
+    get items() { return state.items; },
+    get animate() { return state.animateNext; },
+    set animate(v) { state.animateNext = v; },
+  };
 
   document.addEventListener('DOMContentLoaded', init);
 })();

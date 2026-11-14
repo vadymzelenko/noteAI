@@ -71,15 +71,48 @@
         return item;
     }
 
+    // Файлы проектов (category = '__nf_file') хранят содержимое в body
+    // в виде data:-URL. Чтобы не тянуть мегабайты при каждом запуске, для них
+    // загружаются только метаданные, а содержимое — по запросу (fileData).
+    const FILE_CAT = '__nf_file';
+    const META_COLS = 'id,user_id,type,title,category,tags,references_ids,importance,deadline,done,deleted,deleted_at,draft,font,created_at,updated_at';
+
     async function allItems() {
         const userId = currentUserId();
+        const [main, files] = await Promise.all([
+            client().from(TABLE).select('*').eq('user_id', userId)
+                .or(`category.is.null,category.neq.${FILE_CAT}`)
+                .order('updated_at', { ascending: false }),
+            client().from(TABLE).select(META_COLS).eq('user_id', userId)
+                .eq('category', FILE_CAT),
+        ]);
+        if (main.error) throw main.error;
+        if (files.error) throw files.error;
+        return (main.data || []).concat(files.data || []).map(fromRow);
+    }
+
+    async function fileData(id) {
         const { data, error } = await client()
-            .from(TABLE)
-            .select('*')
-            .eq('user_id', userId)
-            .order('updated_at', { ascending: false });
+            .from(TABLE).select('body').eq('id', id).eq('user_id', currentUserId()).single();
         if (error) throw error;
-        return (data || []).map(fromRow);
+        return data ? data.body : '';
+    }
+
+    // Запись без возврата строки — для больших файлов, чтобы не гонять
+    // содержимое туда-обратно.
+    async function putItem(item) {
+        const row = toRow(item, currentUserId());
+        const { error } = await client().from(TABLE).upsert(row, { onConflict: 'id' });
+        if (error) throw error;
+    }
+
+    async function deleteMany(ids) {
+        if (!ids.length) return;
+        const userId = currentUserId();
+        for (let i = 0; i < ids.length; i += 100) {
+            const { error } = await client().from(TABLE).delete().in('id', ids.slice(i, i + 100)).eq('user_id', userId);
+            if (error) throw error;
+        }
     }
 
     async function upsertItem(item) {
@@ -116,5 +149,5 @@
         if (error) throw error;
     }
 
-    window.DB = { allItems, upsertItem, deleteItem, purgeExpired };
+    window.DB = { allItems, upsertItem, putItem, fileData, deleteItem, deleteMany, purgeExpired };
 })();
