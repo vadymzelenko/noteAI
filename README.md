@@ -1,90 +1,85 @@
 # NodeFlow
 
-Минималистичное веб-приложение для задач, заметок, ссылок и проектов. Упор на скорость, чистый UX и приватность данных.
+A fast, minimal web app for tasks, notes, links and projects, built with a focus on clean UX and data privacy.
 
-## Возможности
+Live: https://note-ai-henna.vercel.app
 
-- **Автосохранение.** Кнопки «Сохранить» больше нет — всё сохраняется само через долю секунды после ввода, при закрытии окна и при сворачивании приложения. Если пропала сеть, изменения встают в очередь и уходят на сервер, когда связь вернётся.
-- **Задачи:** дедлайн и важность (обычная / важная). В списке видны только несколько последних выполненных задач, остальные — в поиске.
-- **Редактор с markdown:** заголовки, жирный, курсив, зачёркивание, списки, чек-листы, цитаты, код с подсветкой, ссылки, таблицы, изображения, графики. Enter продолжает список (`7.` → `8.`), предпросмотр одной кнопкой.
-- **Ссылки:** добавляются вставкой в одно поле, раскладываются по группам, ищутся и копируются в один тап. Ссылки из текста заметок собираются автоматически (можно выключить или запретить отдельные сайты в настройках). Коллекция сама синхронизируется с аккаунтом.
-- **Проекты:**
-  - **дерево мыслей** — блоки со связями (проект → «Дизайн», «Техническая часть», «Реклама»… → подблоки), с масштабом, перетаскиванием, сворачиванием веток и полноэкранным режимом;
-  - **связи-стрелки** между любыми блоками поверх дерева (кнопка 🔗 в дереве или раздел «Связи-стрелки» в блоке), с подписями; раскладка дерева при этом остаётся ровной;
-  - **импорт / экспорт JSON** — проект можно выгрузить или создать из JSON, например сгенерированного ИИ (формат ниже);
-  - у каждого блока свой текст с markdown (код, таблицы, HTML-вставки) и свои файлы;
-  - **журнал записей** — мысли и заметки с датой, к ним тоже можно прикреплять файлы;
-  - **файлы любых типов** (до 10 МБ): просмотр картинок, PDF, Word (.docx), Excel/CSV, HTML, кода, текста прямо в приложении;
-  - **статистика** работы: блоки, записи, файлы, дни работы, примерное время;
-  - **отчёт для печати / PDF**:
-    - обложка с метаданными (автор, даты, ID проекта, режим печати), содержание, нумерованные разделы;
-    - статистика и график активности, схема дерева со связями, блоки и журнал с датами создания и изменения;
-    - содержимое файлов прямо в отчёте: картинки, страницы PDF (можно выбрать, какие), Word, Excel и CSV, код, текст;
-    - панель «Состав» — включать и выключать разделы, отдельные блоки, записи и файлы (сохраняется в проекте);
-    - режимы **Цвет** и **Ч/Б** — для чёрно-белого принтера: только чёрный, без полутонов в тексте, ветки различаются типом линии;
-    - внизу каждой страницы — «VZstudio · проект · дата» и «стр. N из M», в конце — сведения о документе;
-  - **пометки на картинках и страницах PDF**: перо, маркер, стрелка, рамка, текст, обрезка — сохраняются копией, оригинал не меняется;
-  - **PDF можно разбить на картинки** (выбранные страницы);
-  - удаление блока: «только этот блок» (подблоки поднимаются выше) или «вместе с подблоками»; корень дерева (сам проект) из дерева не удаляется;
-- **Темы:** тёмная, светлая и «авто» (по системе) + 6 акцентных цветов.
-- **Адаптивная вёрстка:** на телефоне — нижняя панель вкладок, шторки снизу и редактор на весь экран с учётом клавиатуры; на десктопе — модальные окна и горячие клавиши (`Ctrl+K`, `Ctrl+N`, `/`, `Esc`).
-- **Корзина** с 14-дневным восстановлением и «Отменить» сразу после удаления.
-- **PWA:** устанавливается на домашний экран, оболочка кэшируется офлайн.
+## Features
 
-## Формат JSON проекта
+**Everyday use**
 
-Кнопка «JSON» на странице проекта (экспорт / импорт) и «Импорт JSON» в списке проектов.
-Формат специально простой, чтобы граф проекта мог написать человек или ИИ:
+- Autosave without a Save button: changes are stored a moment after typing, on window close and when the app goes to the background. Offline edits are queued and synced when the connection returns
+- Tasks with deadlines and priority; only the latest completed tasks stay in the list, the rest are available through search
+- Markdown editor: headings, emphasis, lists, checklists, quotes, highlighted code, links, tables, images and charts. Enter continues numbered lists, preview with one click
+- Links: paste into a single field, group, search and copy in one tap. Links found in notes are collected automatically (can be disabled or filtered per site)
+- Trash with 14-day recovery and instant undo
+- Dark, light and system themes with six accent colours
+- Responsive layout: bottom tab bar, sheets and a keyboard-aware full-screen editor on phones; dialogs and shortcuts (`Ctrl+K`, `Ctrl+N`, `/`, `Esc`) on desktop
+- Installable PWA with an offline app shell
+
+**Projects**
+
+- Mind-map tree of blocks with zoom, drag, collapsible branches and full-screen mode
+- Labelled arrows between any blocks on top of the tree, without breaking the layout
+- Markdown content and file attachments for every block
+- Project journal with dated entries
+- Files of any type up to 10 MB with built-in viewers for images, PDF, Word, Excel and CSV, HTML, code and text
+- Annotations on images and PDF pages (pen, highlighter, arrow, frame, text, crop), saved as a copy
+- Splitting PDF pages into images
+- Project statistics: blocks, entries, files, active days, estimated time
+- Printable report and PDF export: cover with metadata, table of contents, activity chart, tree diagram, blocks, journal and file contents. Sections can be toggled; colour and black-and-white print modes
+- JSON import and export, designed so a project can be written by hand or generated by an AI assistant
+
+## Project JSON format
 
 ```json
 {
   "format": "nodeflow.project",
   "version": 1,
-  "title": "Фитнес-приложение",
-  "description": "Мобильное приложение для тренировок (markdown).",
+  "title": "Fitness app",
+  "description": "Mobile workout app (markdown).",
   "color": "#3b82f6",
   "status": "active",
   "blocks": [
-    { "id": "ads", "title": "Реклама", "content": "- таргет\n- блогеры",
+    { "id": "ads", "title": "Marketing", "content": "- targeted ads\n- creators",
       "children": [ { "id": "insta", "title": "Instagram" } ] },
-    { "id": "tech", "title": "Техническая часть", "children": [
-      { "id": "api", "title": "Backend", "content": "API, база данных" },
-      { "id": "app", "title": "Мобильный клиент" }
+    { "id": "tech", "title": "Engineering", "children": [
+      { "id": "api", "title": "Backend", "content": "API, database" },
+      { "id": "app", "title": "Mobile client" }
     ] },
-    { "id": "design", "title": "Дизайн", "children": ["Экран входа", "Онбординг"] }
+    { "id": "design", "title": "Design", "children": ["Sign-in screen", "Onboarding"] }
   ],
   "links": [
-    { "from": "design", "to": "app", "label": "макеты для" }
+    { "from": "design", "to": "app", "label": "mockups for" }
   ],
   "entries": [
-    { "date": "2026-11-14T10:00:00Z", "text": "Старт проекта", "block": "tech" }
+    { "date": "2026-11-14T10:00:00Z", "text": "Project kick-off", "block": "tech" }
   ]
 }
 ```
 
-- `blocks` — дерево: у блока `title`, необязательные `id`, `content` (markdown: списки, таблицы, ```` ```код``` ````, ```` ```html ```` ), `color` (`#rrggbb`), `collapsed`, `children`. Вместо объекта можно писать просто строку-название. Подходит и плоский список с полем `parent` (id родителя).
-- `links` — произвольные стрелки: `from` / `to` — это `id` блока, его название или `"root"` (сам проект); `label` — подпись.
-- `entries` — записи журнала: `text`, `date` (ISO), `title`, `block`.
-- `status` — `active` | `paused` | `done`. Обёртку ```` ```json ```` из ответа ИИ можно не убирать.
-- При экспорте добавляется список `files` (только имена; сами файлы в JSON не входят).
-- При импорте в существующий проект можно выбрать: **заменить дерево** (старые блоки и связи удаляются, файлы блоков переходят в материалы проекта, записи журнала остаются), **добавить к дереву** или создать **новый проект**. Повторный импорт не дублирует записи журнала.
+| Field | Description |
+|---|---|
+| `blocks` | Tree of blocks: `title` and optional `id`, `content` (markdown), `color` (`#rrggbb`), `collapsed`, `children`. A plain string can be used instead of an object. A flat list with a `parent` id also works |
+| `links` | Arrows between blocks: `from` and `to` are a block id, a block title or `"root"`; `label` is optional |
+| `entries` | Journal entries: `text`, `date` (ISO 8601), `title`, `block` |
+| `status` | `active`, `paused` or `done` |
 
-## Запуск
+A surrounding ```` ```json ```` fence from an AI response is accepted. Exports include a `files` list with file names only. When importing into an existing project the tree can be replaced, extended, or imported as a new project; repeated imports do not duplicate journal entries.
+
+## Running locally
 
 ```bash
-# создай .env в корне проекта (см. ниже)
-npm start
+cp .env.example .env    # Supabase URL and anon key
+npm start               # http://localhost:5173
 ```
 
-`.env`:
+## Architecture
 
-```
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=eyJ...
-PORT=5173
-```
+- Frontend: vanilla JavaScript without a build step, CSS custom properties for theming. PDF, Word and Excel libraries live in `public/vendor` and load on demand
+- Backend: a dependency-free Node.js server (`server.js`) that serves the app and its runtime config
+- Data: Supabase with Google sign-in and a single `items` table protected by Row Level Security
 
-## Технологии
+## License
 
-- **Frontend:** ванильный JS без сборки, CSS-переменные для тем. Библиотеки для PDF / Word / Excel лежат в `public/vendor` и грузятся по требованию.
-- **Бэкенд:** минимальный Node.js-сервер без зависимостей (`server.js`) + Supabase (Auth через Google, таблица `items` с RLS).
+[MIT](LICENSE) © Vadym Zelenko
