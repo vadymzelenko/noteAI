@@ -873,6 +873,7 @@
     const st = stats(p.id);
     return `
       <button class="proj-card" data-project="${p.id}" style="--c:${p.color};--i:${Math.min(i, 14)}">
+        ${window.Patterns && (!window.Prefs || Prefs.get('covers')) ? `<span class="proj-cover">${Patterns.html(p.id, { style: window.Prefs ? Prefs.get('coverStyle') : 'auto', hue: Patterns.hueFromColor(p.color), h: 120 })}</span>` : ''}
         <span class="proj-card-top">
           <span class="proj-dot"></span>
           <span class="status-pill s-${p.status}">${STATUS[p.status]}</span>
@@ -2167,6 +2168,25 @@
 
   window.Projects = {
     ingest, reset, render, open, close, createDialog, addAction, onEscape,
+    exportJson,
+    // Открыть блок или запись проекта (для глобального поиска).
+    openItem(kind, id) {
+      const o = kind === 'block' ? block(id) : entry(id);
+      if (!o || !visibleProject(o.p)) return;
+      open(o.p);
+      setTimeout(() => openRec(kind, id), 250);
+    },
+    searchItems(q) {
+      const n = String(q || '').toLowerCase();
+      if (!n) return [];
+      const alive = (pid) => !!visibleProject(pid);
+      const hit = (t) => String(t || '').toLowerCase().includes(n);
+      return [
+        ...S.blocks.filter((b) => alive(b.p) && (hit(b.title) || hit(b.content))).map((b) => ({ kind: 'block', id: b.id, title: b.title || 'Без названия', text: b.content, project: proj(b.p).title, at: b.updatedAt })),
+        ...S.entries.filter((e) => alive(e.p) && (hit(e.title) || hit(e.text))).map((e) => ({ kind: 'entry', id: e.id, title: e.title || NF.plainPreview(e.text, 60) || 'Запись', text: e.text, project: proj(e.p).title, at: e.updatedAt })),
+      ].sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 30);
+    },
+    list: () => S.projects.filter((p) => !p.deleted).map((p) => ({ id: p.id, title: p.title })),
     trashed, restore, purge,
     get openId() { return openId; },
   };

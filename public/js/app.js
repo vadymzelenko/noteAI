@@ -5,8 +5,10 @@
   /* ====================== КОНСТАНТЫ ====================== */
 
   const TRASH_TTL = 14 * 24 * 60 * 60 * 1000;
-  const DONE_VISIBLE = 5;          // сколько последних выполненных задач показывать
-  const AUTOSAVE_DELAY = 700;      // мс тишины после ввода до автосохранения
+  // Настройки (prefs.js); значения по умолчанию — если модуль не загрузился.
+  const pref = (k, def) => (window.Prefs ? Prefs.get(k) : def);
+  const doneVisible = () => +pref('doneVisible', 5);
+  const autosaveDelay = () => ({ fast: 350, normal: 700, slow: 1500 }[pref('autosave', 'normal')] || 700);
   const RETRY_DELAY = 5000;
 
   // Служебные записи в таблице items (старые настройки ИИ и коллекция ссылок) —
@@ -808,6 +810,9 @@
   }
 
   function sortActiveTasks(items) {
+    const mode = pref('taskSort', 'deadline');
+    if (mode === 'importance') return [...items].sort((a, b) => ((b.importance === 'red') - (a.importance === 'red')) || (a.deadline || Infinity) - (b.deadline || Infinity) || (b.updatedAt || 0) - (a.updatedAt || 0));
+    if (mode === 'created') return [...items].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     return [...items].sort((a, b) => {
       const ad = a.deadline || Infinity, bd = b.deadline || Infinity;
       if (ad !== bd) return ad - bd;
@@ -820,6 +825,7 @@
     const tasks = state.items.filter((x) => x.type === 'task' && visible(x));
     const active = sortActiveTasks(tasks.filter((x) => !x.done));
     const done = tasks.filter((x) => x.done).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const DONE_VISIBLE = doneVisible();
     const shownDone = done.slice(0, DONE_VISIBLE);
     const important = active.filter((x) => x.importance === 'red').length;
     const overdue = active.filter((x) => x.deadline && x.deadline < Date.now()).length;
@@ -846,12 +852,18 @@
   }
 
   function renderNotesView() {
-    const notes = state.items.filter((x) => x.type === 'note' && visible(x))
-      .sort((a, b) => ((b.importance === 'red') - (a.importance === 'red')) || (b.updatedAt || 0) - (a.updatedAt || 0));
+    const sortBy = pref('noteSort', 'updated');
+    const impFirst = pref('importantFirst', true);
+    const notes = state.items.filter((x) => x.type === 'note' && visible(x)).sort((a, b) => {
+      if (impFirst && a.importance !== b.importance) return a.importance === 'red' ? -1 : 1;
+      if (sortBy === 'title') return (a.title || '').localeCompare(b.title || '', 'ru');
+      if (sortBy === 'created') return (b.createdAt || 0) - (a.createdAt || 0);
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
     const imp = notes.filter((x) => x.importance === 'red').length;
     const sub = `${notes.length} ${plural(notes.length, 'заметка', 'заметки', 'заметок')}${imp ? ` · <span class="sub-red">${imp} ${plural(imp, 'важная', 'важные', 'важных')}</span>` : ''}`;
     const body = notes.length
-      ? `<div class="notes-grid">${notes.map(renderNoteCard).join('')}</div>`
+      ? `<div class="notes-grid view-${pref('noteView', 'grid')}">${notes.map(renderNoteCard).join('')}</div>`
       : `<div class="empty">${svgIcon('note', 28, 1.5)}<div>Пока нет заметок</div><small>Нажми «+», чтобы записать мысль</small></div>`;
     return viewHead('Заметки', sub, 'Заметка') + body;
   }
@@ -867,7 +879,7 @@
 
   function renderTaskRow(it, i) {
     const rem = it.done ? null : remaining(it.deadline);
-    const desc = previewLines(it.body, 2);
+    const desc = pref('taskDesc', true) ? previewLines(it.body, 2) : '';
     const meta = [];
     if (it.deadline) {
       meta.push(`<span class="meta-pill ${rem ? rem.kind : 'muted'}" title="${escapeHtml(fmtTime(it.deadline))}">${svgIcon('clock', 12, 2)}${escapeHtml(fmtHuman(it.deadline))}${rem && rem.kind !== 'ok' ? ` · ${escapeHtml(rem.text)}` : ''}</span>`);
@@ -888,9 +900,13 @@
     return swipeWrap(it.id, i, inner);
   }
 
-  function coverHtml(body) {
+  function coverHtml(body, it) {
     const img = window.Media && Media.firstImage(body);
-    if (!img) return '';
+    if (!img) {
+      // Нет картинки — генеративный узор (если включено в настройках).
+      if (!it || !window.Patterns || !pref('covers', true) || pref('noteView', 'grid') === 'list') return '';
+      return `<div class="note-cover is-pattern">${Patterns.html(it.id, { style: pref('coverStyle', 'auto'), h: 120 })}</div>`;
+    }
     return img.id
       ? `<div class="note-cover"><img data-nfimg="${escapeHtml(img.id)}" alt=""></div>`
       : `<div class="note-cover"><img src="${escapeHtml(img.url)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>`;
@@ -901,7 +917,7 @@
     const imp = it.importance === 'red';
     const inner = `
       <div class="row note-card ${it.font === 'mono' ? 'mono' : ''} ${imp ? 'is-important' : ''}" data-open="${it.id}" tabindex="0">
-        ${coverHtml(it.body)}
+        ${coverHtml(it.body, it)}
         <div class="row-body">
           <div class="row-title">${imp ? '<i class="imp-glow" title="Важная"></i>' : ''}${escapeHtml(it.title || 'Без названия')}</div>
           ${lines ? `<div class="note-lines">${lines}</div>` : ''}
@@ -921,6 +937,7 @@
         const it = state.items.find((x) => x.id === el.dataset.toggle);
         if (!it) return;
         it.done = !it.done;
+        if (window.Prefs) Prefs.haptic(it.done ? 14 : 8);
         const row = el.closest('.swipe-item');
         if (row) row.classList.add(it.done ? 'completing' : 'reopening');
         el.setAttribute('aria-pressed', String(it.done));
@@ -938,7 +955,7 @@
         clearTimeout(lp);
         lp = setTimeout(() => {
           lp = 'fired';
-          if (navigator.vibrate) navigator.vibrate(12);
+          if (window.Prefs) Prefs.haptic(12);
           if (!listSel) setListSelect(true, el.dataset.open); else toggleSelected(el.dataset.open, el);
         }, 480);
       }, { passive: true });
@@ -1226,7 +1243,7 @@
       if (a === b && !e.shiftKey) replaceRange(a, b, '  ');
       return;
     }
-    if (e.key !== 'Enter' || e.shiftKey || mod || e.isComposing) return;
+    if (e.key !== 'Enter' || e.shiftKey || mod || e.isComposing || !pref('listContinue', true)) return;
     const { selectionStart: a, selectionEnd: b, value: v } = ta;
     if (a !== b) return;
     const ls = v.lastIndexOf('\n', a - 1) + 1;
@@ -1340,7 +1357,8 @@
     state.editingId = item ? item.id : uid();
     editor.isNew = !item;
 
-    const t = item || { title: '', body: '', importance: 'green', deadline: null, font: 'sans', done: false };
+    const t = item || { title: '', body: '', importance: 'green', deadline: null, font: pref('monoDefault', false) ? 'mono' : 'sans', done: false };
+    editor.bodyEl.spellcheck = !!pref('spellcheck', true);
     editor.titleEl.value = t.title || '';
     editor.bodyEl.value = t.body || '';
     editor.bodyEl.dataset.owner = state.editingId;
@@ -1350,7 +1368,8 @@
     setFont(t.font);
     // Заметки с таблицами, кодом, картинками или чек-листами открываются
     // в режиме чтения — нажатие на текст переключает в правку.
-    setPreview(!!item && isRich(t.body));
+    const rm = pref('readMode', 'auto');
+    setPreview(!!item && !!t.body.trim() && (rm === 'always' || (rm === 'auto' && isRich(t.body))));
 
     const ov = editor.overlay;
     ov.classList.add('open');
@@ -1386,7 +1405,7 @@
     editor.dirty = true;
     setSaveState('pending');
     clearTimeout(editor.timer);
-    editor.timer = setTimeout(flushSave, AUTOSAVE_DELAY);
+    editor.timer = setTimeout(flushSave, autosaveDelay());
   }
 
   // Сохраняет текущее состояние редактора. Вызовы выстраиваются в очередь,
@@ -1789,7 +1808,7 @@
   let previewBatch = [];
   let previewTimer = null;
   function queuePreviews(links) {
-    if (!window.Media) return;
+    if (!window.Media || !pref('linkPreviews', true)) return;
     const week = 7 * 24 * 3600 * 1000;
     links.filter((l) => !l.previewAt || (!l.image && Date.now() - l.previewAt > week)).slice(0, 24).forEach((l) => {
       if (previewPending.has(l.id)) return;
@@ -1834,7 +1853,9 @@
           <a class="link-main" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">
             ${l.image
               ? `<span class="link-thumb"><img src="${escapeHtml(l.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`
-              : `<span class="link-avatar">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>`}
+              : window.Patterns && pref('covers', true)
+                ? `<span class="link-thumb">${Patterns.html(l.domain || l.url, { style: pref('coverStyle', 'auto'), w: 160, h: 110, label: escapeHtml((l.domain || '?')[0].toUpperCase()) })}</span>`
+                : `<span class="link-avatar">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>`}
             <span class="link-text">
               <span class="link-title">${escapeHtml(title)}</span>
               <span class="link-sub">${escapeHtml(sub || l.url)}${gname ? ` <span class="link-group">${svgIcon('folder', 11)}${escapeHtml(gname)}</span>` : ''}</span>
@@ -1899,7 +1920,6 @@
       const link = Links.addLink(raw, { group });
       if (!link) { toast('Это не похоже на ссылку', 'err'); inp.classList.add('shake'); setTimeout(() => inp.classList.remove('shake'), 400); return; }
       inp.value = '';
-      state.animateNext = true;
       renderLinkGroups();
       renderLinksList();
       updateLinksSub();
@@ -2019,65 +2039,94 @@
     openOverlay('settingsOverlay');
   }
 
+  let settingsTab = 'look';
+  const SETTINGS_TABS = [
+    ['look', 'Вид'], ['notes', 'Заметки'], ['tasks', 'Задачи'], ['editor', 'Редактор'], ['links', 'Ссылки'], ['data', 'Данные'],
+  ];
+
   function renderSettings() {
     const body = $('settingsBody');
+    const P = window.Prefs;
+    const g = (k) => P.get(k);
     const trashCount = state.items.filter(isDeleted).length + (window.Projects ? Projects.trashed().length : 0);
     const block = Links.blocklist;
-    body.innerHTML = `
-      <section class="set-section">
-        <h3>Оформление</h3>
-        <div class="set-row">
-          <span class="set-label">Тема</span>
-          <div class="seg seg-sm" id="themeSeg">
-            <span class="seg-indicator" aria-hidden="true"></span>
-            <button type="button" data-theme-pref="dark" class="${state.themePref === 'dark' ? 'active' : ''}">Тёмная</button>
-            <button type="button" data-theme-pref="light" class="${state.themePref === 'light' ? 'active' : ''}">Светлая</button>
-            <button type="button" data-theme-pref="system" class="${state.themePref === 'system' ? 'active' : ''}">Авто</button>
-          </div>
-        </div>
-        <div class="set-row">
-          <span class="set-label">Акцент</span>
-          <div class="swatches" role="radiogroup" aria-label="Акцентный цвет">
-            ${ACCENTS.map((a) => `<button type="button" class="swatch sw-${a.id} ${state.accent === a.id ? 'active' : ''}" data-accent="${a.id}" title="${a.label}" aria-label="${a.label}" role="radio" aria-checked="${state.accent === a.id}"></button>`).join('')}
-          </div>
-        </div>
-      </section>
 
-      <section class="set-section">
-        <h3>Ссылки</h3>
-        <label class="set-row switch-row">
-          <span><span class="set-label">Собирать ссылки из записей</span><small>Ссылки из текста задач и заметок сами попадают в раздел «Ссылки»</small></span>
-          <input type="checkbox" class="switch" id="autoCollect" ${Links.isAutoCollect() ? 'checked' : ''}>
-        </label>
-        ${block.length ? `
-          <div class="set-sub">Не собирать с этих сайтов</div>
-          <div class="chips wrap">${block.map((b) => `<span class="chip static">${escapeHtml(b.value)}<button type="button" class="chip-x" data-unblock="${escapeHtml(b.value)}" aria-label="Убрать">${svgIcon('close', 12, 2.4)}</button></span>`).join('')}</div>
-        ` : ''}
-      </section>
+    const opts = (key, list) => `<div class="opt-chips" role="radiogroup">${list.map(([v, l]) =>
+      `<button type="button" class="chip ${String(g(key)) === String(v) ? 'active' : ''}" data-pref="${key}" data-val="${escapeHtml(String(v))}" role="radio" aria-checked="${String(g(key)) === String(v)}">${l}</button>`).join('')}</div>`;
+    const row = (label, hint, control) => `<div class="set-row"><span class="set-text"><span class="set-label">${label}</span>${hint ? `<small>${hint}</small>` : ''}</span>${control}</div>`;
+    const sw = (key, label, hint) => `<label class="set-row switch-row"><span class="set-text"><span class="set-label">${label}</span>${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" class="switch" data-pref-bool="${key}" ${g(key) ? 'checked' : ''}></label>`;
 
-      <section class="set-section">
-        <h3>Данные</h3>
+    const coverPreview = window.Patterns ? `<div class="cover-demo">${['grid', 'waves', 'arcs', 'triangles', 'rings', 'dots'].map((st, i) =>
+      `<button type="button" class="cover-opt ${g('coverStyle') === st ? 'active' : ''}" data-pref="coverStyle" data-val="${st}" title="${st}">${Patterns.html('demo-' + i, { style: st, w: 160, h: 90 })}</button>`).join('')}
+      <button type="button" class="cover-opt auto ${g('coverStyle') === 'auto' ? 'active' : ''}" data-pref="coverStyle" data-val="auto">Разные</button></div>` : '';
+
+    const panes = {
+      look: `
+        ${row('Тема', '', `<div class="opt-chips">${[['dark', 'Тёмная'], ['light', 'Светлая'], ['system', 'Авто']].map(([v, l]) => `<button type="button" class="chip ${state.themePref === v ? 'active' : ''}" data-theme-pref="${v}">${l}</button>`).join('')}</div>`)}
+        ${row('Акцент', '', `<div class="swatches" role="radiogroup" aria-label="Акцентный цвет">${ACCENTS.map((a) => `<button type="button" class="swatch sw-${a.id} ${state.accent === a.id ? 'active' : ''}" data-accent="${a.id}" title="${a.label}" aria-label="${a.label}" role="radio" aria-checked="${state.accent === a.id}"></button>`).join('')}</div>`)}
+        ${row('Размер текста', 'Заметки, задачи и редактор', opts('textSize', [['s', 'S'], ['m', 'M'], ['l', 'L'], ['xl', 'XL']]))}
+        ${row('Плотность списков', '', opts('density', [['compact', 'Плотно'], ['normal', 'Обычно'], ['cozy', 'Просторно']]))}
+        ${row('Скругления', '', opts('radius', [['sharp', 'Острые'], ['normal', 'Обычные'], ['round', 'Круглые']]))}
+        ${row('Шрифт интерфейса', '', opts('uiFont', [['geist', 'Geist'], ['system', 'Системный'], ['serif', 'С засечками']]))}
+        ${sw('motion', 'Анимации', 'Плавные появления и переходы')}
+        ${sw('haptics', 'Вибрация', 'Лёгкий отклик при отметке задач и выборе (телефон)')}
+        ${row('Открывать при запуске', '', opts('startMode', [['last', 'Последний'], ['tasks', 'Задачи'], ['notes', 'Заметки'], ['links', 'Ссылки'], ['projects', 'Проекты']]))}`,
+      notes: `
+        ${row('Вид списка', '', opts('noteView', [['grid', 'Плитка'], ['list', 'Список']]))}
+        ${row('Сортировка', '', opts('noteSort', [['updated', 'По изменению'], ['created', 'По созданию'], ['title', 'По названию']]))}
+        ${sw('importantFirst', 'Важные наверху', 'Важные заметки всегда в начале списка')}
+        ${row('Режим чтения', 'Как открывать существующие заметки', opts('readMode', [['auto', 'Авто'], ['always', 'Всегда'], ['never', 'Сразу правка']]))}
+        ${sw('covers', 'Автообложки', 'Если в заметке нет картинки — красивый узор, подобранный под тему')}
+        <div class="set-sub">Стиль узоров</div>
+        ${coverPreview}`,
+      tasks: `
+        ${row('Сортировка задач', '', opts('taskSort', [['deadline', 'По дедлайну'], ['importance', 'Сначала важные'], ['created', 'Новые сверху']]))}
+        ${row('Выполненные в списке', 'Остальные — в поиске', opts('doneVisible', [[0, 'Скрыть'], [3, '3'], [5, '5'], [10, '10']]))}
+        ${sw('taskDesc', 'Показывать описание', 'Первые строки текста под названием задачи')}`,
+      editor: `
+        ${row('Автосохранение', 'Через сколько сохранять после ввода', opts('autosave', [['fast', 'Сразу'], ['normal', 'Обычно'], ['slow', 'Реже']]))}
+        ${sw('listContinue', 'Продолжать списки по Enter', '«7.» → «8.», «- » → «- »')}
+        ${sw('spellcheck', 'Проверка орфографии', '')}
+        ${sw('monoDefault', 'Моноширинный шрифт для новых записей', 'Удобно для кода и таблиц')}`,
+      links: `
+        ${sw('linkPreviews', 'Обложки и заголовки ссылок', 'Подгружаются автоматически со страниц')}
+        <label class="set-row switch-row"><span class="set-text"><span class="set-label">Собирать ссылки из записей</span><small>Ссылки из текста задач и заметок сами попадают в раздел «Ссылки»</small></span><input type="checkbox" class="switch" id="autoCollect" ${Links.isAutoCollect() ? 'checked' : ''}></label>
+        ${block.length ? `<div class="set-sub">Не собирать с этих сайтов</div>
+          <div class="chips wrap">${block.map((b) => `<span class="chip static">${escapeHtml(b.value)}<button type="button" class="chip-x" data-unblock="${escapeHtml(b.value)}" aria-label="Убрать">${svgIcon('close', 12, 2.4)}</button></span>`).join('')}</div>` : ''}`,
+      data: `
         <div class="nav-grid">
           <button class="nav-card" id="navMetrics">${svgIcon('metrics', 18)}<span>Аналитика</span></button>
           <button class="nav-card" id="navTrash">${svgIcon('trash', 18)}<span>Корзина</span>${trashCount ? `<span class="badge">${trashCount}</span>` : ''}</button>
+          <button class="nav-card" id="navBackup">${svgIcon('download', 18)}<span>Резервная копия</span></button>
+          <button class="nav-card" id="navCache">${svgIcon('theme', 18)}<span>Обновить приложение</span></button>
         </div>
-      </section>
-
-      <section class="set-section keys-section">
-        <h3>Горячие клавиши</h3>
-        <div class="keys">
+        <p class="hint set-note">Резервная копия — один JSON-файл со всеми задачами, заметками, ссылками и проектами (без файлов). «Обновить приложение» очищает кэш и загружает свежую версию — помогает, если что-то выглядит странно.</p>
+        <div class="set-sub keys-section">Горячие клавиши</div>
+        <div class="keys keys-section">
           <div><kbd>Ctrl</kbd><kbd>K</kbd><span>команды и поиск</span></div>
           <div><kbd>Ctrl</kbd><kbd>N</kbd><span>новая запись</span></div>
           <div><kbd>/</kbd><span>поиск</span></div>
           <div><kbd>Esc</kbd><span>закрыть (всё сохранится)</span></div>
         </div>
-      </section>`;
+        <div class="set-foot"><span>NodeNote · настройки хранятся на этом устройстве</span><button class="btn ghost sm danger" id="prefsReset">Сбросить настройки</button></div>`,
+    };
 
-    requestAnimationFrame(() => moveIndicator($('themeSeg')));
+    body.innerHTML = `
+      <div class="set-tabs" role="tablist">${SETTINGS_TABS.map(([k, l]) => `<button type="button" class="set-tab ${k === settingsTab ? 'active' : ''}" data-stab="${k}" role="tab">${l}</button>`).join('')}</div>
+      <div class="set-pane">${panes[settingsTab]}</div>`;
+
+    body.querySelectorAll('[data-stab]').forEach((b) => b.addEventListener('click', () => { settingsTab = b.dataset.stab; renderSettings(); }));
+    body.querySelectorAll('[data-pref]').forEach((b) => b.addEventListener('click', () => {
+      const key = b.dataset.pref;
+      const raw = b.dataset.val;
+      const v = typeof P.defaults[key] === 'number' ? +raw : raw;
+      P.set(key, v);
+      body.querySelectorAll(`[data-pref="${key}"]`).forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', String(on)); });
+    }));
+    body.querySelectorAll('[data-pref-bool]').forEach((c) => c.addEventListener('change', () => P.set(c.dataset.prefBool, c.checked)));
     body.querySelectorAll('[data-theme-pref]').forEach((b) => b.addEventListener('click', () => {
       state.themePref = b.dataset.themePref;
       body.querySelectorAll('[data-theme-pref]').forEach((x) => x.classList.toggle('active', x === b));
-      moveIndicator($('themeSeg'));
       applyTheme();
     }));
     body.querySelectorAll('[data-accent]').forEach((b) => b.addEventListener('click', () => {
@@ -2085,10 +2134,52 @@
       body.querySelectorAll('[data-accent]').forEach((x) => { const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', String(on)); });
       applyTheme();
     }));
-    $('autoCollect').addEventListener('change', (e) => Links.setAutoCollect(e.target.checked));
+    const ac = $('autoCollect');
+    if (ac) ac.addEventListener('change', (e) => Links.setAutoCollect(e.target.checked));
     body.querySelectorAll('[data-unblock]').forEach((b) => b.addEventListener('click', () => { Links.removeBlock(b.dataset.unblock); renderSettings(); }));
-    $('navMetrics').addEventListener('click', () => { closeOverlay('settingsOverlay'); openMetrics(); });
-    $('navTrash').addEventListener('click', () => { closeOverlay('settingsOverlay'); openTrash(); });
+    const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+    on('navMetrics', () => { closeOverlay('settingsOverlay'); openMetrics(); });
+    on('navTrash', () => { closeOverlay('settingsOverlay'); openTrash(); });
+    on('navBackup', exportBackup);
+    on('navCache', refreshApp);
+    on('prefsReset', async () => {
+      if (!(await askConfirm({ title: 'Сбросить настройки?', message: 'Тема и данные останутся, вернутся только настройки по умолчанию.', actionText: 'Сбросить' }))) return;
+      P.reset(); renderSettings();
+    });
+  }
+
+  // Резервная копия всего в один JSON-файл.
+  function exportBackup() {
+    const data = {
+      format: 'nodenote.backup',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      items: state.items.filter((x) => !x.deleted).map((x) => ({
+        id: x.id, type: x.type, title: x.title, body: x.body, importance: x.importance,
+        deadline: x.deadline ? new Date(x.deadline).toISOString() : null, done: !!x.done,
+        createdAt: x.createdAt ? new Date(x.createdAt).toISOString() : null,
+        updatedAt: x.updatedAt ? new Date(x.updatedAt).toISOString() : null,
+      })),
+      links: { links: Links.links, groups: Links.groups },
+      projects: window.Projects ? Projects.list().map((p) => Projects.exportJson(p.id)) : [],
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `nodenote-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Резервная копия сохранена', 'ok');
+  }
+
+  // Полное обновление: очистить кэш service worker и перезагрузить.
+  async function refreshApp() {
+    await flushSave();
+    try {
+      if ('serviceWorker' in navigator) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+      if (window.caches) for (const k of await caches.keys()) await caches.delete(k);
+    } catch { /* ignore */ }
+    location.reload();
   }
 
   /* ====================== АНАЛИТИКА ====================== */
@@ -2336,57 +2427,98 @@
     return safe.replace(new RegExp('(' + qs + ')', 'ig'), '<mark>$1</mark>');
   }
 
-  function renderSearch() {
-    const body = $('searchBody');
-    const needle = $('searchInput').value.trim().toLowerCase();
-    const type = state.search.type;
-    const matches = state.items.filter((x) => {
+  function searchFilter(type, needle) {
+    return state.items.filter((x) => {
       if (!visible(x)) return false;
       if (type === 'task' && x.type !== 'task') return false;
       if (type === 'note' && x.type !== 'note') return false;
-      if (type === 'red' && !(x.type === 'task' && x.importance === 'red' && !x.done)) return false;
+      if (type === 'red' && !(x.importance === 'red' && !x.done)) return false;
       if (type === 'done' && !(x.type === 'task' && x.done)) return false;
       if (needle && !((x.title || '') + ' ' + (x.body || '')).toLowerCase().includes(needle)) return false;
       return true;
-    }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    });
+  }
+
+  function searchItemHtml(it, needle, i) {
+    const isTask = it.type === 'task';
+    let side = '';
+    if (isTask && it.done) side = '<span class="sr-side muted">выполнено</span>';
+    else if (isTask && it.deadline) {
+      const rem = remaining(it.deadline);
+      side = `<span class="sr-side ${rem.kind}">${escapeHtml(fmtHuman(it.deadline, false))}</span>`;
+    } else side = `<span class="sr-side">${escapeHtml(fmtHuman(it.updatedAt, false))}</span>`;
+    const snippet = it.body ? searchSnippet(it.body, needle) : '';
+    return `
+      <button class="search-result ${i === 0 ? 'active' : ''}" data-open="${it.id}">
+        <span class="sr-ico ${isTask ? 'is-task' : 'is-note'} ${it.done ? 'is-done' : ''}">${svgIcon(isTask ? (it.done ? 'check' : 'task') : 'note', 16)}</span>
+        <span class="sr-body">
+          <span class="sr-title">${it.importance === 'red' && !it.done ? '<i class="imp-glow"></i>' : ''}${highlightMatch(it.title || plainPreview(it.body, 60) || 'Без названия', needle)}</span>
+          ${snippet ? `<span class="sr-desc">${snippet}</span>` : ''}
+        </span>
+        ${side}
+      </button>`;
+  }
+
+  function renderSearch() {
+    const body = $('searchBody');
+    const raw = $('searchInput').value.trim();
+    const needle = raw.toLowerCase();
+    const type = state.search.type;
+    $('searchClear').hidden = !raw;
+
+    // Счётчики на фильтрах.
+    document.querySelectorAll('#searchType .sf').forEach((b) => {
+      const n = searchFilter(b.dataset.type, needle).length;
+      b.querySelector('span').textContent = needle || b.dataset.type !== 'all' ? String(n) : '';
+      b.classList.toggle('active', b.dataset.type === type);
+    });
+
+    let i = 0;
+    const group = (title, items, html) => (items.length ? `<div class="search-section"><span>${title}</span><b>${items.length}</b></div>${html}` : '');
 
     if (!needle && type === 'all') {
-      body.innerHTML = '<div class="search-hint">Ищу по заголовкам и тексту.<br><kbd>↑</kbd> <kbd>↓</kbd> — выбор, <kbd>Enter</kbd> — открыть</div>';
-      return;
-    }
-    if (!matches.length) { body.innerHTML = '<div class="empty small">Ничего не найдено</div>'; return; }
-
-    body.innerHTML = matches.slice(0, 80).map((it, i) => {
-      const meta = [];
-      if (it.type === 'task' && it.done) meta.push('<span class="meta-pill muted">выполнено</span>');
-      else if (it.type === 'task' && it.deadline) {
-        const rem = remaining(it.deadline);
-        meta.push(`<span class="meta-pill ${rem.kind}">${escapeHtml(fmtHuman(it.deadline))}</span>`);
-      }
-      if (it.type === 'task' && it.importance === 'red' && !it.done) meta.push('<span class="meta-pill red"><span class="dot red"></span>Важно</span>');
-      return `
-        <button class="search-result ${i === 0 ? 'active' : ''}" data-open="${it.id}">
-          <span class="sr-ico">${svgIcon(it.type === 'task' ? 'task' : 'note', 16)}</span>
+      const recent = [...state.items].filter(visible).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 8);
+      body.innerHTML = recent.length
+        ? group('Недавние', recent, recent.map((it) => searchItemHtml(it, '', i++)).join(''))
+        : '<div class="search-empty">Здесь появятся твои записи</div>';
+    } else {
+      const matches = searchFilter(type, needle).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 80);
+      const tasks = matches.filter((x) => x.type === 'task');
+      const notes = matches.filter((x) => x.type === 'note');
+      const proj = needle && type === 'all' && window.Projects && Projects.searchItems ? Projects.searchItems(needle) : [];
+      const taskHtml = tasks.map((it) => searchItemHtml(it, needle, i++)).join('');
+      const noteHtml = notes.map((it) => searchItemHtml(it, needle, i++)).join('');
+      const projHtml = proj.map((p) => `
+        <button class="search-result ${i++ === 0 ? 'active' : ''}" data-proj="${p.kind}:${p.id}">
+          <span class="sr-ico is-proj">${svgIcon(p.kind === 'block' ? 'tree' : 'note', 16)}</span>
           <span class="sr-body">
-            <span class="sr-title">${highlightMatch(it.title || 'Без названия', needle)}</span>
-            ${it.body ? `<span class="sr-desc">${searchSnippet(it.body, needle)}</span>` : ''}
-            ${meta.length ? `<span class="row-meta">${meta.join('')}</span>` : ''}
+            <span class="sr-title">${highlightMatch(p.title, needle)}</span>
+            <span class="sr-desc">${escapeHtml(p.project)}${p.text ? ' · ' + searchSnippet(p.text, needle) : ''}</span>
           </span>
-        </button>`;
-    }).join('');
+          <span class="sr-side">${p.kind === 'block' ? 'блок' : 'запись'}</span>
+        </button>`).join('');
+      const html = group('Задачи', tasks, taskHtml)
+        + group('Заметки', notes, noteHtml)
+        + group('Проекты', proj, projHtml);
+      body.innerHTML = html || `<div class="search-empty">${svgIcon('search', 26, 1.6)}<div>Ничего не нашлось</div><small>${raw ? `по запросу «${escapeHtml(raw)}»` : 'в этом фильтре'}</small></div>`;
+    }
 
-    body.querySelectorAll('.search-result').forEach((btn) => btn.addEventListener('click', () => {
+    body.querySelectorAll('[data-open]').forEach((btn) => btn.addEventListener('click', () => {
       const it = state.items.find((x) => x.id === btn.dataset.open);
       if (!it) return;
       closeOverlay('searchOverlay');
       openEditor(it);
+    }));
+    body.querySelectorAll('[data-proj]').forEach((btn) => btn.addEventListener('click', () => {
+      const [kind, id] = btn.dataset.proj.split(':');
+      closeOverlay('searchOverlay');
+      Projects.openItem(kind, id);
     }));
   }
 
   function openSearch(type = 'all') {
     if (!Auth.isSignedIn()) { openAccountModal(); return; }
     state.search.type = type;
-    document.querySelectorAll('#searchType .chip').forEach((x) => x.classList.toggle('active', x.dataset.type === type));
     $('searchInput').value = '';
     renderSearch();
     openOverlay('searchOverlay');
@@ -2407,11 +2539,12 @@
     $('searchBtn').addEventListener('click', () => openSearch());
     const input = $('searchInput');
     input.addEventListener('input', renderSearch);
-    document.querySelectorAll('#searchType .chip').forEach((c) => c.addEventListener('click', () => {
+    document.querySelectorAll('#searchType .sf').forEach((c) => c.addEventListener('click', () => {
       state.search.type = c.dataset.type;
-      document.querySelectorAll('#searchType .chip').forEach((x) => x.classList.toggle('active', x === c));
       renderSearch();
+      input.focus();
     }));
+    $('searchClear').addEventListener('click', () => { input.value = ''; renderSearch(); input.focus(); });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowDown') { e.preventDefault(); moveActive($('searchBody'), '.search-result', 1); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive($('searchBody'), '.search-result', -1); }
@@ -2522,6 +2655,11 @@
     update();
   }
 
+  // Приложение не масштабируется: на iPhone блокируем жест «щипок»
+  // (Safari игнорирует user-scalable=no), двойной тап гасит touch-action в CSS.
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) =>
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+
   // Высота видимой области с учётом экранной клавиатуры (iOS/Android).
   function bindViewport() {
     const vv = window.visualViewport;
@@ -2630,6 +2768,8 @@
       state.themePref = localStorage.getItem('nf.theme') || 'dark';
       state.accent = localStorage.getItem('nf.accent') || 'mono';
       state.mode = localStorage.getItem('nf.mode') || 'tasks';
+      const sm = pref('startMode', 'last');
+      if (sm && sm !== 'last') state.mode = sm;
     } catch { /* ignore */ }
     if (!['dark', 'light', 'system'].includes(state.themePref)) state.themePref = 'dark';
     if (!ACCENTS.some((a) => a.id === state.accent)) state.accent = 'mono';
@@ -2656,6 +2796,9 @@
     document.querySelectorAll('#modeTabs button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
     window.addEventListener('resize', () => moveIndicator($('modeTabs')));
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => moveIndicator($('modeTabs')));
+
+    // Настройки поменялись — перерисовываем экран.
+    if (window.Prefs) Prefs.onChange(() => { state.animateNext = false; render(); });
 
     // Ссылки поменялись (в т.ч. пришли из облака) — обновляем раздел.
     Links.onChange(() => {

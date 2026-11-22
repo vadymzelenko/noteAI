@@ -6,7 +6,7 @@
 // • Supabase, /api и прочие внешние запросы — только сеть, не кэшируются.
 // • Новая версия ждёт, пока пользователь нажмёт «Обновить» (SKIP_WAITING).
 
-const VERSION = 'nodenote-v22';
+const VERSION = 'nodenote-v23';
 const SHELL = [
   '/',
   '/index.html',
@@ -14,6 +14,8 @@ const SHELL = [
   '/config.js',
   '/css/style.css',
   '/js/theme-boot.js',
+  '/js/prefs.js',
+  '/js/patterns.js',
   '/js/auth.js',
   '/js/db.js',
   '/js/links.js',
