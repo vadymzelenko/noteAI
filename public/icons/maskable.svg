@@ -1,28 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1d1b26"/>
-      <stop offset="1" stop-color="#08080a"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.3" cy="0.25" r="0.85">
-      <stop offset="0" stop-color="#8b5cf6" stop-opacity=".5"/>
-      <stop offset=".55" stop-color="#3b82f6" stop-opacity=".12"/>
-      <stop offset="1" stop-color="#000" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="ln" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#60a5fa"/>
-      <stop offset="1" stop-color="#c084fc"/>
-    </linearGradient>
-    <filter id="blur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="12"/></filter>
-  </defs>
-  <rect width="512" height="512" fill="url(#bg)"/>
-  <rect width="512" height="512" fill="url(#glow)"/>
-  <g transform="translate(256 256) scale(.72) translate(-256 -256)">
-    <path d="M152 358 V154 L360 358 V154" fill="none" stroke="url(#ln)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" filter="url(#blur)" opacity=".85"/>
-    <path d="M152 358 V154 L360 358 V154" fill="none" stroke="url(#ln)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="152" cy="358" r="30" fill="#0b0b0f" stroke="#60a5fa" stroke-width="12"/>
-    <circle cx="152" cy="154" r="30" fill="#0b0b0f" stroke="#7c83fb" stroke-width="12"/>
-    <circle cx="360" cy="358" r="30" fill="#0b0b0f" stroke="#a78bfa" stroke-width="12"/>
-    <circle cx="360" cy="154" r="34" fill="#f5f3ff"/>
+  <rect width="512" height="512" fill="#111113"/>
+  <g transform="translate(256 256) scale(.74) translate(-256 -256)">
+    <path d="M178 104 H306 L372 170 V380 a28 28 0 0 1 -28 28 H178 a28 28 0 0 1 -28 -28 V132 a28 28 0 0 1 28 -28 Z" fill="#fafafa"/>
+    <path d="M306 104 V146 a24 24 0 0 0 24 24 H372 Z" fill="#c9c9cf"/>
+    <rect x="190" y="200" width="142" height="20" rx="10" fill="#111113"/>
+    <rect x="190" y="246" width="142" height="20" rx="10" fill="#111113"/>
+    <line x1="204" y1="322" x2="290" y2="322" stroke="#111113" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="204" cy="322" r="17" fill="#111113"/>
+    <circle cx="300" cy="322" r="17" fill="#fafafa" stroke="#111113" stroke-width="10"/>
   </g>
 </svg>
