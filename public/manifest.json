@@ -1,22 +1,29 @@
 {
-  "name": "NodeFlow — задачи и заметки",
-  "short_name": "NodeFlow",
-  "description": "Быстрый менеджер задач, заметок и ссылок с markdown и синхронизацией.",
+  "id": "/",
+  "name": "NodeNote — задачи, заметки, проекты",
+  "short_name": "NodeNote",
+  "description": "Задачи, заметки, ссылки и проекты с деревом мыслей, файлами и отчётами. Всё сохраняется само.",
   "lang": "ru",
   "dir": "ltr",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
   "background_color": "#09090b",
   "theme_color": "#09090b",
   "categories": ["productivity", "utilities"],
+  "prefer_related_applications": false,
   "icons": [
-    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icons/maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Новая задача", "short_name": "Задача", "url": "/?action=new-task" },
-    { "name": "Новая заметка", "short_name": "Заметка", "url": "/?action=new-note" }
+    { "name": "Новая задача", "short_name": "Задача", "url": "/?action=new-task", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Новая заметка", "short_name": "Заметка", "url": "/?action=new-note", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Проекты", "short_name": "Проекты", "url": "/?mode=projects", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

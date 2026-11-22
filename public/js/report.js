@@ -1,4 +1,4 @@
-// NodeFlow — печатный отчёт по проекту (печать / сохранение в PDF).
+// NodeNote — печатный отчёт по проекту (печать / сохранение в PDF).
 // Обложка с метаданными, содержание, статистика, структура (дерево + связи),
 // блоки, журнал, содержимое файлов (картинки, PDF постранично, Word, Excel,
 // CSV, код, текст), перечень файлов, сведения о документе.
@@ -11,7 +11,7 @@
   const NF = window.NF;
   const { $, svgIcon, escapeHtml, plural, fmtTime, renderBody, toast, pad2 } = NF;
   const BRAND = 'VZstudio';
-  const APP = 'NodeFlow';
+  const APP = 'NodeNote';
   const FORMAT_VERSION = '2';
 
   const SECTIONS = [
@@ -237,6 +237,8 @@
     }
     if (seq !== buildSeq) return;
     paper.innerHTML = html(prepared);
+    // Картинки, вставленные в текст (nf:…), подгружаем до печати.
+    if (window.Media) await Media.hydrate(paper);
   }
 
   // Файл попадает в отчёт, только если включён его «владелец» (блок / запись).

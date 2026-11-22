@@ -3,14 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <title>NodeFlow — задачи и заметки</title>
-  <meta name="description" content="NodeFlow — задачи, заметки, ссылки и проекты с деревом мыслей, файлами и отчётами.">
+  <title>NodeNote</title>
+  <meta name="description" content="NodeNote — задачи, заметки, ссылки и проекты с деревом мыслей, файлами и отчётами.">
 
-  <meta name="theme-color" content="#09090b">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self' https: wss:; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
+  <meta name="application-name" content="NodeNote">
+  <meta name="apple-mobile-web-app-title" content="NodeNote">
+  <meta name="format-detection" content="telephone=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob:; frame-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https: wss:; base-uri 'self'; form-action 'self'; object-src 'none'">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/icons/icon.svg">
+  <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -21,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+  <link rel="stylesheet" href="/vendor/prism-1.29.0/prism-tomorrow.min.css">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -30,8 +35,8 @@
 
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">nf</div>
-      <span class="brand-name">NodeFlow</span>
+      <img class="brand-mark" src="/icons/icon.svg" alt="" width="32" height="32">
+      <span class="brand-name">NodeNote</span>
     </div>
 
     <div class="topbar-actions">
@@ -80,6 +85,9 @@
       </div>
       <span class="save-state" id="saveState" role="status" aria-live="polite"></span>
       <div class="editor-head-actions">
+        <button class="icon-btn" id="editorSide" title="Открыть рядом с другой записью" aria-label="Открыть рядом">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+        </button>
         <button class="icon-btn" id="editorDelete" title="В корзину" aria-label="В корзину">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
         </button>
@@ -90,14 +98,14 @@
     </header>
 
     <div class="editor-scroll" id="editorScroll">
-      <input class="editor-title" id="editorTitle" type="text" placeholder="Заголовок" autocomplete="off" enterkeyhint="next">
+      <input class="editor-title" id="editorTitle" type="text" placeholder="Заголовок" autocomplete="off" autocapitalize="sentences" enterkeyhint="next">
 
       <div class="task-meta" id="taskMeta">
-        <label class="pill-field deadline-pill" id="deadlinePill" title="Дедлайн">
+        <button type="button" class="pill-field deadline-pill" id="deadlinePill" title="Дедлайн">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span class="pill-label" id="deadlineLabel">Дедлайн</span>
-          <input id="editorDeadline" type="datetime-local" aria-label="Дедлайн">
-        </label>
+        </button>
+        <input id="editorDeadline" type="hidden">
         <button type="button" class="pill-clear" id="deadlineClear" title="Убрать дедлайн" aria-label="Убрать дедлайн" hidden>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -115,7 +123,7 @@
 
       <div class="toolbar" id="editorToolbar" role="toolbar" aria-label="Форматирование"></div>
 
-      <textarea class="editor-body" id="editorBody" placeholder="Просто пиши…" spellcheck="true"></textarea>
+      <textarea class="editor-body" id="editorBody" placeholder="Просто пиши…" spellcheck="true" autocapitalize="sentences" autocomplete="off"></textarea>
       <div class="editor-preview md" id="editorPreview" hidden></div>
     </div>
 
@@ -351,24 +359,27 @@
 
 <div class="toast-stack" id="toastStack" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-markup.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-css.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-clike.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-cpp.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-json.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-bash.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-core.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-markup.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-css.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-clike.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-c.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-javascript.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-typescript.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-python.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-cpp.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-json.min.js"></script>
+<script src="/vendor/prism-1.29.0/prism-bash.min.js"></script>
 
 <script src="/config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="/vendor/supabase-2.118.0.js"></script>
 <script src="/js/auth.js"></script>
 <script src="/js/db.js"></script>
 <script src="/js/links.js"></script>
 <script src="/js/app.js"></script>
+<script src="/js/media.js"></script>
+<script src="/js/datepicker.js"></script>
+<script src="/js/workspace.js"></script>
 <script src="/js/projects.js"></script>
 <script src="/js/annotate.js"></script>
 <script src="/js/report.js"></script>

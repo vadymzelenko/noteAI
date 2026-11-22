@@ -1,11 +1,13 @@
-// NodeFlow — минимальный статический сервер без внешних зависимостей.
-// Читает .env, раздаёт PWA из /public, отдаёт /config.js из переменных окружения.
+// NodeNote — минимальный сервер без внешних зависимостей.
+// Читает .env, раздаёт PWA из /public, отдаёт /config.js из переменных окружения,
+// умеет делать предпросмотр ссылок (/api/preview: заголовок и картинка страницы).
 // Никаких client id — Google-вход реализован целиком через Supabase OAuth.
 
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
-const zlib = require('zlib');
+const http   = require('http');
+const fs     = require('fs');
+const path   = require('path');
+const zlib   = require('zlib');
+const crypto = require('crypto');
 
 const ROOT     = path.join(__dirname, 'public');
 const ENV_PATH = path.join(__dirname, '.env');
@@ -38,7 +40,7 @@ const PORT = Number(env.PORT) || 5173;
 /* ---------- Runtime-конфиг для фронтенда ---------- */
 function runtimeConfig() {
   return {
-    APP_NAME:            env.APP_NAME || 'NodeFlow',
+    APP_NAME:            env.APP_NAME || 'NodeNote',
     SUPABASE_URL:        env.SUPABASE_URL || '',
     SUPABASE_ANON_KEY:   env.SUPABASE_ANON_KEY || '',
   };
@@ -58,7 +60,35 @@ const MIME = {
   '.jpeg': 'image/jpeg',
   '.ico':  'image/x-icon',
   '.woff2':'font/woff2',
+  '.webp': 'image/webp',
+  '.txt':  'text/plain; charset=utf-8',
+  '.md':   'text/markdown; charset=utf-8',
 };
+
+/* ---------- Кэш файлов + ETag ----------
+   Раньше JS/CSS отдавались с «вечным» кэшем (immutable на год), а имена
+   файлов не менялись — после обновления браузер мог годами держать старый
+   код. Теперь всё, кроме версионированных библиотек в /vendor, отдаётся с
+   no-cache + ETag: браузер каждый раз сверяется с сервером и получает 304,
+   если файл не изменился (быстро и всегда свежо). */
+const fileCache = new Map(); // filePath → { mtime, data, gz, etag }
+
+function loadFile(filePath, cb) {
+  fs.stat(filePath, (err, st) => {
+    if (err || !st.isFile()) return cb(err || new Error('not a file'));
+    const hit = fileCache.get(filePath);
+    if (hit && hit.mtime === st.mtimeMs) return cb(null, hit);
+    fs.readFile(filePath, (rerr, data) => {
+      if (rerr) return cb(rerr);
+      const entry = { mtime: st.mtimeMs, data, gz: null, etag: '"' + crypto.createHash('sha1').update(data).digest('base64url').slice(0, 20) + '"' };
+      if (data.length < 4 * 1024 * 1024) fileCache.set(filePath, entry);
+      cb(null, entry);
+    });
+  });
+}
+
+/* ---------- Предпросмотр ссылок (логика в lib/preview.js) ---------- */
+const { handlePreview } = require('./lib/preview');
 
 /* ---------- Общие заголовки безопасности ---------- */
 function withSecurityHeaders(headers) {
@@ -76,9 +106,11 @@ function withSecurityHeaders(headers) {
 
 /* ---------- HTTP-сервер ---------- */
 const server = http.createServer((req, res) => {
-  let urlPath;
+  let urlPath, query;
   try {
-    urlPath = decodeURIComponent(req.url.split('?')[0]);
+    const q = req.url.indexOf('?');
+    urlPath = decodeURIComponent(q === -1 ? req.url : req.url.slice(0, q));
+    query = new URLSearchParams(q === -1 ? '' : req.url.slice(q + 1));
   } catch {
     res.writeHead(400);
     return res.end('Bad Request');
@@ -93,8 +125,10 @@ const server = http.createServer((req, res) => {
   // Лёгкий health-check для мониторинга и проверки, что сервер жив.
   if (urlPath === '/api/health') {
     res.writeHead(200, withSecurityHeaders({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }));
-    return res.end(JSON.stringify({ ok: true, app: 'NodeFlow', time: Date.now() }));
+    return res.end(JSON.stringify({ ok: true, app: 'NodeNote', time: Date.now() }));
   }
+
+  if (urlPath === '/api/preview') { handlePreview(req, res, { env, query, headers: withSecurityHeaders({}) }); return; }
 
   // Динамический конфиг из .env — не кэшируется, отдаётся на каждый запрос.
   // SUPABASE_ANON_KEY — публичный ключ по дизайну Supabase (доступ к данным
@@ -116,52 +150,57 @@ const server = http.createServer((req, res) => {
     return res.end('Forbidden');
   }
 
-  fs.readFile(filePath, (err, data) => {
+  loadFile(filePath, (err, entry) => {
     if (err) {
       res.writeHead(404, withSecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }));
       return res.end('404 — файл не найден: ' + urlPath);
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
+    const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream', ETag: entry.etag };
 
-    // Кэш-политика: html, service worker и манифест всегда свежие (no-cache);
-    // статические ресурсы с «вечным» кэшем — у них имена/версии меняются при
-    // обновлении, поэтому не залипаем на устаревших версиях.
-    if (urlPath === '/service-worker.js') {
-      headers['Cache-Control'] = 'no-cache';
-      headers['Service-Worker-Allowed'] = '/';
-    } else if (urlPath === '/' || urlPath === '/index.html' || urlPath === '/config.js' || urlPath === '/manifest.json') {
-      headers['Cache-Control'] = 'no-cache';
-    } else if (/\.(css|js|mjs|svg|png|jpe?g|ico|woff2?)$/.test(urlPath)) {
-      headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    // Кэш-политика:
+    //  • /vendor/* — в имени файла версия, можно кэшировать навсегда;
+    //  • иконки — сутки;
+    //  • всё остальное (html, js, css, манифест, service worker) — no-cache + ETag.
+    if (urlPath.startsWith('/vendor/')) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    else if (urlPath.startsWith('/icons/')) headers['Cache-Control'] = 'public, max-age=86400';
+    else headers['Cache-Control'] = 'no-cache';
+    if (urlPath === '/service-worker.js') headers['Service-Worker-Allowed'] = '/';
+    if (ext === '.json' && urlPath === '/manifest.json') headers['Content-Type'] = 'application/manifest+json; charset=utf-8';
+
+    if (req.headers['if-none-match'] === entry.etag) {
+      res.writeHead(304, withSecurityHeaders(headers));
+      return res.end();
     }
 
-    // gzip для сжимаемых текстовых типов — заметно экономит трафик.
+    const data = entry.data;
     const acceptEncoding = req.headers['accept-encoding'] || '';
-    const compressible = /^(text\/|application\/(json|javascript)|image\/svg\+xml)/.test(headers['Content-Type']);
+    const compressible = /^(text\/|application\/(json|javascript|manifest)|image\/svg\+xml)/.test(headers['Content-Type']);
     if (compressible && /\bgzip\b/.test(acceptEncoding) && data.length > 512) {
-      zlib.gzip(data, { level: 6 }, (zerr, gz) => {
-        if (zerr) {
-          res.writeHead(200, withSecurityHeaders(headers));
-          return res.end(data);
-        }
+      headers['Vary'] = 'Accept-Encoding';
+      const sendGz = (gz) => {
         headers['Content-Encoding'] = 'gzip';
-        headers['Vary'] = 'Accept-Encoding';
         res.writeHead(200, withSecurityHeaders(headers));
-        res.end(gz);
+        res.end(req.method === 'HEAD' ? undefined : gz);
+      };
+      if (entry.gz) return sendGz(entry.gz);
+      zlib.gzip(data, { level: 6 }, (zerr, gz) => {
+        if (zerr) { res.writeHead(200, withSecurityHeaders(headers)); return res.end(data); }
+        entry.gz = gz;
+        sendGz(gz);
       });
       return;
     }
 
     res.writeHead(200, withSecurityHeaders(headers));
-    res.end(data);
+    res.end(req.method === 'HEAD' ? undefined : data);
   });
 });
 
 server.listen(PORT, () => {
   const cfg = runtimeConfig();
-  console.log(`\n  NodeFlow запущен → http://localhost:${PORT}\n`);
+  console.log(`\n  NodeNote запущен → http://localhost:${PORT}\n`);
   if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     console.warn('  ⚠  Supabase не настроен. Заполни .env (SUPABASE_URL, SUPABASE_ANON_KEY).\n');
   } else {

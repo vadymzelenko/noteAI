@@ -1,5 +1,5 @@
 {
-  "name": "nodeflow",
+  "name": "nodenote",
   "version": "1.0.0",
   "description": "Менеджер задач, заметок и ссылок с автосохранением и синхронизацией через Supabase",
   "main": "server.js",
