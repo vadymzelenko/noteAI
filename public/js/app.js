@@ -207,19 +207,26 @@
     return `<pre class="${cls}"><code>${escapeHtml(code)}</code></pre>`;
   }
 
-  function renderChart(values) {
-    if (!values.length) return '';
-    const max = Math.max(...values, 1);
-    const W = 300, H = 100, barW = W / values.length;
-    let bars = '';
-    values.forEach((v, i) => {
-      const h = (v / max) * (H - 20);
-      const x = i * barW + 4;
-      const y = H - 10 - h;
-      bars += `<rect class="bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(barW - 8).toFixed(1)}" height="${h.toFixed(1)}" rx="3"/>`;
-      bars += `<text class="label" x="${(x + (barW - 8) / 2).toFixed(1)}" y="${H - 1}" text-anchor="middle">${v}</text>`;
-    });
-    return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line class="axis" x1="0" y1="${H - 10}" x2="${W}" y2="${H - 10}"/>${bars}</svg></div>`;
+  // График: ```chart
+  //   3, 7, 4, 9          — просто числа
+  //   Пн: 3, Вт: 7        — с подписями (через запятую или с новой строки)
+  // Рисуется HTML-столбцами — текст не растягивается при любой ширине.
+  function renderChart(src) {
+    const items = String(src).split(/[,;\n]+/).map((t) => t.trim()).filter(Boolean).map((t) => {
+      const m = t.match(/^(.*?)[:=]\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+      if (m) return { label: m[1].trim(), v: parseFloat(m[2].replace(',', '.')) };
+      const n = t.match(/-?\d+(?:[.,]\d+)?/);
+      return n ? { label: '', v: parseFloat(n[0].replace(',', '.')) } : null;
+    }).filter(Boolean).slice(0, 40);
+    if (!items.length) return '';
+    const max = Math.max(...items.map((x) => x.v), 0) || 1;
+    const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+    return `<div class="chart"><div class="cb-cols">${items.map((x) => `
+      <div class="cb-col" title="${escapeHtml(x.label ? x.label + ': ' : '')}${fmt(x.v)}">
+        <span class="cb-val">${fmt(x.v)}</span>
+        <div class="cb-bar" style="height:${Math.max(2, (Math.max(0, x.v) / max) * 100).toFixed(1)}%"></div>
+        ${items.some((y) => y.label) ? `<span class="cb-lab">${escapeHtml(x.label)}</span>` : ''}
+      </div>`).join('')}</div></div>`;
   }
 
   function renderTable(rows) {
@@ -278,7 +285,7 @@
     let cbIndex = 0;
 
     src = src.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, body) => {
-      if (lang === 'chart') blocks.push(renderChart((body.match(/-?\d+(?:\.\d+)?/g) || []).map(Number)));
+      if (lang === 'chart') blocks.push(renderChart(body));
       else if (lang === 'html') {
         // HTML показываем как страницу в изолированной «песочнице» (без скриптов) + код под спойлером.
         blocks.push(`<div class="html-embed"><iframe sandbox="" loading="lazy" title="HTML" srcdoc="${escapeHtml(body)}"></iframe><details><summary>Код HTML</summary>${highlightCode(body.replace(/\n$/, ''), 'html')}</details></div>`);
@@ -1197,7 +1204,7 @@
         if (window.Media) { Media.pick(ta); break; }
         insertBlock('![описание](https://)', 13, 8);
         break;
-      case 'chart': insertBlock('```chart\n3, 7, 4, 9, 6\n```', 9, 13); break;
+      case 'chart': insertBlock('```chart\nПн: 3, Вт: 7, Ср: 4, Чт: 9, Пт: 6\n```', 9, 31); break;
     }
   }
 
