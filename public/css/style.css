@@ -1401,6 +1401,7 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 4px; paddi
   gap: 8px;
   transform: translateX(-50%);
   pointer-events: none;
+  align-self: stretch;
   width: max-content;
   max-width: calc(100vw - 32px);
 }
@@ -3058,3 +3059,39 @@ mark { padding: 0; border-radius: 3px; box-decoration-break: clone; -webkit-box-
 .task-row .row-body { min-width: 0; }
 .task-row .row-meta { flex-wrap: wrap; min-width: 0; }
 .task-row .meta-pill { max-width: 100%; min-width: 0; white-space: normal; height: auto; line-height: 1.3; padding-top: 3px; padding-bottom: 3px; }
+
+/* v6: миниатюра задачи — полоса-обложка во всю высоту справа,
+   плавно растворяется в карточке. */
+.task-row { --thumb-w: clamp(150px, 22%, 240px); padding-right: calc(var(--thumb-w) * .72); }
+.task-row .task-thumb {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: var(--thumb-w);
+  height: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0;
+  background: transparent;
+  pointer-events: none;
+  align-self: stretch;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0,0,0,.35) 30%, #000 75%);
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0,0,0,.35) 30%, #000 75%);
+  opacity: .9;
+  transition: opacity .25s;
+}
+.task-row:hover .task-thumb { opacity: 1; }
+.task-row .task-thumb .pat, .task-row .task-thumb svg { width: 100%; height: 100%; display: block; }
+.task-row .row-body, .task-row .check { position: relative; z-index: 1; }
+.task-row .row-del {
+  position: absolute; top: 10px; right: 10px; z-index: 2; margin: 0; align-self: auto;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.task-row.done .task-thumb { opacity: .35; filter: grayscale(.7); }
+[data-density='compact'] .task-row { --thumb-w: clamp(110px, 16%, 170px); }
+[data-density='cozy'] .task-row { --thumb-w: clamp(180px, 26%, 280px); }
+[data-density] .task-row .task-thumb { width: var(--thumb-w); height: auto; border-radius: 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0; }
+@media (max-width: 720px) {
+  .task-row { --thumb-w: 34%; padding-right: 24%; }
+  .task-row .task-thumb { width: var(--thumb-w); height: auto; }
+}

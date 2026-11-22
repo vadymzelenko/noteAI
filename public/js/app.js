@@ -910,7 +910,7 @@
         : `<img src="${escapeHtml(img.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`}</span>`;
     }
     if (!window.Patterns || !pref('covers', true)) return '';
-    return `<span class="task-thumb">${Patterns.html(it.id, { style: pref('coverStyle', 'auto'), w: 120, h: 120 })}</span>`;
+    return `<span class="task-thumb">${Patterns.html(it.id, { style: pref('coverStyle', 'auto'), w: 260, h: 150 })}</span>`;
   }
 
   function coverHtml(body, it) {
