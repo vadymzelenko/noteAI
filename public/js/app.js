@@ -1,4 +1,4 @@
-// NodeFlow — основная логика интерфейса. Бэкенд — Supabase (см. db.js).
+// NodeNote — основная логика интерфейса. Бэкенд — Supabase (см. db.js).
 (function () {
   'use strict';
 
@@ -70,6 +70,8 @@
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
     print: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+    columns: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/><line x1="15" y1="4" x2="15" y2="20"/>',
+    star: '<polygon points="12 2 15.1 8.3 22 9.3 17 14.1 18.2 21 12 17.8 5.8 21 7 14.1 2 9.3 8.9 8.3 12 2"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   };
 
@@ -171,6 +173,30 @@
       .slice(0, max);
   }
 
+  // Анонс для карточек с сохранением строк: списки, чек-листы, нумерация.
+  function previewLines(text, maxLines = 6) {
+    const out = [];
+    let inCode = false;
+    for (const raw of String(text || '').replace(/\r\n/g, '\n').split('\n')) {
+      if (/^```/.test(raw.trim())) { if (!inCode) out.push('<span class="pl-code">‹код›</span>'); inCode = !inCode; continue; }
+      if (inCode) continue;
+      let line = raw.replace(/!\[[^\]]*\]\([^)]*\)/g, '').trim();
+      if (!line || /^\|[\s\-:|]+\|$/.test(line)) continue;
+      let cls = '', mark = '';
+      let m;
+      if ((m = line.match(/^[-*]\s+\[([ xX])\]\s*(.*)$/))) { mark = m[1] === ' ' ? '☐' : '☑'; cls = m[1] === ' ' ? '' : 'pl-done'; line = m[2]; }
+      else if ((m = line.match(/^[-*]\s+(.*)$/))) { mark = '•'; line = m[1]; }
+      else if ((m = line.match(/^(\d+)\.\s+(.*)$/))) { mark = m[1] + '.'; line = m[2]; }
+      else if ((m = line.match(/^#{1,3}\s+(.*)$/))) { cls = 'pl-h'; line = m[1]; }
+      else if ((m = line.match(/^>\s?(.*)$/))) { cls = 'pl-q'; line = m[1]; }
+      line = line.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/\*\*|~~|`|\*/g, '').replace(/^\|\s*|\s*\|$/g, '').replace(/\s*\|\s*/g, ' · ');
+      if (!line && !mark) continue;
+      out.push(`<span class="pl ${cls}">${mark ? `<b class="pl-m">${escapeHtml(mark)}</b>` : ''}${escapeHtml(line.slice(0, 140))}</span>`);
+      if (out.length >= maxLines) break;
+    }
+    return out.join('');
+  }
+
   /* ====================== MARKDOWN ====================== */
 
   function highlightCode(code, lang) {
@@ -214,8 +240,10 @@
     let s = escapeHtml(text);
     const codes = [];
     s = s.replace(/`([^`]+)`/g, (_, c) => { codes.push(c); return `\u0001${codes.length - 1}\u0001`; });
+    s = s.replace(/!\[([^\]]*)\]\(nf:([\w-]+)\)/g, (m, alt, id) =>
+      `<img class="md-img" data-nfimg="${id}" alt="${alt}">`);
     s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, alt, url) =>
-      `<img class="md-img" src="${safeUrl(url)}" alt="${alt}" loading="lazy">`);
+      `<img class="md-img" src="${safeUrl(url)}" alt="${alt}" loading="lazy" referrerpolicy="no-referrer">`);
     s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, label, url) =>
       `<a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`);
     s = s.replace(/(^|[\s(])(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, (m, pre, url) =>
@@ -227,10 +255,27 @@
     return s;
   }
 
+  // Переключить n-й пункт чек-листа в тексте (без учёта блоков кода).
+  function toggleChecklist(text, n) {
+    const lines = text.split('\n');
+    let inCode = false, k = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^```/.test(lines[i].trim())) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      const m = lines[i].match(/^(\s*[-*]\s+\[)([ xX])(\].*)$/);
+      if (!m) continue;
+      if (k++ === n) { lines[i] = m[1] + (m[2] === ' ' ? 'x' : ' ') + m[3]; return lines.join('\n'); }
+    }
+    return text;
+  }
+
+  const isRich = (t) => /```|^\s*\|.+\||!\[[^\]]*\]\(|^\s*[-*]\s+\[[ xX]\]/m.test(t || '');
+
   function renderBody(text) {
     if (!text) return '';
     let src = text.replace(/\r\n/g, '\n');
     const blocks = [];
+    let cbIndex = 0;
 
     src = src.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, body) => {
       if (lang === 'chart') blocks.push(renderChart((body.match(/-?\d+(?:\.\d+)?/g) || []).map(Number)));
@@ -280,7 +325,7 @@
       if (cl) {
         openList('ul', 'checklist');
         const on = cl[1] !== ' ';
-        out.push(`<li class="${on ? 'on' : ''}"><span class="cb">${on ? svgIcon('check', 12, 3) : ''}</span><span>${renderInline(cl[2])}</span></li>`);
+        out.push(`<li class="${on ? 'on' : ''}" data-cb="${cbIndex++}"><span class="cb" role="checkbox" aria-checked="${on}">${on ? svgIcon('check', 12, 3) : ''}</span><span>${renderInline(cl[2])}</span></li>`);
         continue;
       }
 
@@ -441,7 +486,7 @@
   let retryTimer = null;
 
   function normalizeItem(it) {
-    if (it.type === 'task') it.importance = normImp(it.importance);
+    it.importance = normImp(it.importance);
     // Раньше черновики прятались до явного «Сохранить». Теперь всё
     // сохраняется само, поэтому старые черновики — обычные записи.
     it.draft = false;
@@ -461,7 +506,23 @@
       // Строки проектов (проекты, блоки, записи, файлы) живут в projects.js.
       const isProjectRow = (x) => String(x.category || '').startsWith('__nf_');
       if (window.Projects) Projects.ingest(all.filter(isProjectRow));
+      if (window.Media) Media.ingest(all);
       state.items = all.filter((x) => !SERVICE_IDS.has(x.id) && !isProjectRow(x)).map(normalizeItem);
+      // Через минуту после загрузки — уборка картинок без владельца.
+      setTimeout(() => {
+        if (!window.Media || !Auth.isSignedIn()) return;
+        const P = window.Projects && Projects._;
+        Media.cleanup((owner) => {
+          const it = state.items.find((x) => x.id === owner);
+          if (it) return it.body || '';
+          const b = P && P.block(owner);
+          if (b) return b.content || '';
+          const e = P && P.entry(owner);
+          if (e) return e.text || '';
+          if (owner && editor.overlay && state.editingId === owner) return editor.bodyEl.value;
+          return undefined;
+        });
+      }, 60000);
       // Локальные несохранённые правки важнее того, что пришло с сервера.
       pendingSync.forEach((it) => upsertLocal(it));
     } catch (e) {
@@ -602,6 +663,7 @@
       return;
     }
     if (mode !== 'projects' && window.Projects && Projects.openId) Projects.close({ silent: true });
+    clearSelections();
     state.mode = mode;
     try { localStorage.setItem('nf.mode', mode); } catch { /* ignore */ }
     state.animateNext = true;
@@ -644,7 +706,7 @@
     const configured = Auth.isConfigured();
     return `
       <section class="welcome">
-        <div class="welcome-mark">nf</div>
+        <img class="welcome-mark" src="/icons/icon.svg" alt="" width="72" height="72">
         <h1>Задачи, заметки и ссылки — в одном месте</h1>
         <p>Всё сохраняется само и синхронизируется между устройствами.</p>
         ${configured
@@ -665,8 +727,77 @@
           <h1 class="view-title">${title}</h1>
           <div class="view-sub">${sub}</div>
         </div>
-        ${addLabel ? `<button class="btn primary add-btn" id="addBtn">${svgIcon('plus', 16, 2.2)}<span>${addLabel}</span></button>` : ''}
+        ${addLabel ? `<div class="view-actions">
+          <button class="btn ${listSel ? 'primary' : ''}" id="selectBtn" title="Выбрать несколько">${svgIcon('checklist', 16)}<span>${listSel ? 'Готово' : 'Выбрать'}</span></button>
+          <button class="btn primary add-btn" id="addBtn">${svgIcon('plus', 16, 2.2)}<span>${addLabel}</span></button>
+        </div>` : ''}
       </div>`;
+  }
+
+  /* ====================== ВЫБОР НЕСКОЛЬКИХ ЗАПИСЕЙ ====================== */
+  let listSel = null;   // Set выбранных id или null
+
+  function setListSelect(on, firstId) {
+    listSel = on ? new Set(firstId ? [firstId] : []) : null;
+    render();
+    updateListSelectBar();
+  }
+
+  function clearSelections() {
+    if (listSel) { listSel = null; hideSelectBar(); }
+    if (typeof linkSel !== 'undefined' && linkSel) { linkSel = null; hideSelectBar(); }
+  }
+
+  function toggleSelected(id, rowEl) {
+    if (!listSel) return;
+    if (listSel.has(id)) listSel.delete(id); else listSel.add(id);
+    const sw = rowEl && rowEl.closest('.swipe-item');
+    if (sw) sw.classList.toggle('selected', listSel.has(id));
+    updateListSelectBar();
+  }
+
+  function updateListSelectBar() {
+    if (!listSel) { hideSelectBar(); return; }
+    const isTasks = state.mode === 'tasks';
+    const chosen = () => state.items.filter((x) => listSel.has(x.id));
+    showSelectBar({
+      count: listSel.size,
+      noun: isTasks ? ['задача', 'задачи', 'задач'] : ['заметка', 'заметки', 'заметок'],
+      actions: [
+        { id: 'all', label: 'Все', icon: 'checklist' },
+        { id: 'side', label: 'Рядом', icon: 'columns', need: 1, max: 3 },
+        { id: 'imp', label: 'Важность', icon: 'star', need: 1 },
+        ...(isTasks ? [{ id: 'done', label: 'Выполнено', icon: 'check', need: 1 }] : []),
+        { id: 'del', label: 'Удалить', icon: 'trash', danger: true, need: 1 },
+      ],
+      onAction: async (act) => {
+        const items = chosen();
+        if (act === 'all') {
+          const all = state.items.filter((x) => visible(x) && x.type === (isTasks ? 'task' : 'note')).map((x) => x.id);
+          listSel = listSel.size === all.length ? new Set() : new Set(all);
+          render(); updateListSelectBar();
+        } else if (act === 'side') {
+          const ids = items.map((x) => x.id);
+          setListSelect(false);
+          if (window.Workspace) Workspace.open(ids);
+        } else if (act === 'imp') {
+          const to = items.every((x) => x.importance === 'red') ? 'green' : 'red';
+          items.forEach((x) => { x.importance = to; persistQuiet(x); });
+          toast(to === 'red' ? 'Отмечены как важные' : 'Отмечены как обычные', 'ok', 1800);
+          render(); updateListSelectBar();
+        } else if (act === 'done') {
+          const to = !items.every((x) => x.done);
+          items.forEach((x) => { x.done = to; persistQuiet(x); });
+          setListSelect(false);
+        } else if (act === 'del') {
+          const ids = items.map((x) => x.id);
+          for (const id of ids) await softDeleteItem(id);
+          setListSelect(false);
+          toast(`В корзине: ${ids.length}`, 'info', 5000, { label: 'Отменить', onClick: async () => { for (const id of ids) await restoreItem(id); render(); } });
+        }
+      },
+      onClose: () => setListSelect(false),
+    });
   }
 
   function sortActiveTasks(items) {
@@ -709,8 +840,9 @@
 
   function renderNotesView() {
     const notes = state.items.filter((x) => x.type === 'note' && visible(x))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    const sub = `${notes.length} ${plural(notes.length, 'заметка', 'заметки', 'заметок')}`;
+      .sort((a, b) => ((b.importance === 'red') - (a.importance === 'red')) || (b.updatedAt || 0) - (a.updatedAt || 0));
+    const imp = notes.filter((x) => x.importance === 'red').length;
+    const sub = `${notes.length} ${plural(notes.length, 'заметка', 'заметки', 'заметок')}${imp ? ` · <span class="sub-red">${imp} ${plural(imp, 'важная', 'важные', 'важных')}</span>` : ''}`;
     const body = notes.length
       ? `<div class="notes-grid">${notes.map(renderNoteCard).join('')}</div>`
       : `<div class="empty">${svgIcon('note', 28, 1.5)}<div>Пока нет заметок</div><small>Нажми «+», чтобы записать мысль</small></div>`;
@@ -719,7 +851,8 @@
 
   function swipeWrap(id, i, inner, extraCls = '') {
     return `
-      <div class="swipe-item ${extraCls}" data-id="${id}" style="--i:${Math.min(i, 14)}">
+      <div class="swipe-item ${extraCls} ${listSel && listSel.has(id) ? 'selected' : ''}" data-id="${id}" style="--i:${Math.min(i, 14)}">
+        ${listSel ? `<span class="sel-box" aria-hidden="true">${svgIcon('check', 12, 3)}</span>` : ''}
         <div class="swipe-actions"><button class="swipe-delete" data-swipe-delete aria-label="Удалить">${svgIcon('trash', 18)}</button></div>
         ${inner}
       </div>`;
@@ -727,7 +860,7 @@
 
   function renderTaskRow(it, i) {
     const rem = it.done ? null : remaining(it.deadline);
-    const desc = plainPreview(it.body, 160);
+    const desc = previewLines(it.body, 2);
     const meta = [];
     if (it.deadline) {
       meta.push(`<span class="meta-pill ${rem ? rem.kind : 'muted'}" title="${escapeHtml(fmtTime(it.deadline))}">${svgIcon('clock', 12, 2)}${escapeHtml(fmtHuman(it.deadline))}${rem && rem.kind !== 'ok' ? ` · ${escapeHtml(rem.text)}` : ''}</span>`);
@@ -740,7 +873,7 @@
         </button>
         <div class="row-body">
           <div class="row-title"><span>${escapeHtml(it.title || plainPreview(it.body, 80) || 'Без названия')}</span></div>
-          ${desc && it.title ? `<div class="row-desc">${escapeHtml(desc)}</div>` : ''}
+          ${desc && it.title ? `<div class="note-lines task-lines">${desc}</div>` : ''}
           ${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}
         </div>
         <button class="row-del" data-del="${it.id}" title="В корзину" aria-label="В корзину">${svgIcon('trash', 16)}</button>
@@ -748,13 +881,23 @@
     return swipeWrap(it.id, i, inner);
   }
 
+  function coverHtml(body) {
+    const img = window.Media && Media.firstImage(body);
+    if (!img) return '';
+    return img.id
+      ? `<div class="note-cover"><img data-nfimg="${escapeHtml(img.id)}" alt=""></div>`
+      : `<div class="note-cover"><img src="${escapeHtml(img.url)}" alt="" loading="lazy" referrerpolicy="no-referrer"></div>`;
+  }
+
   function renderNoteCard(it, i) {
-    const desc = plainPreview(it.body, 260);
+    const lines = previewLines(it.body, 7);
+    const imp = it.importance === 'red';
     const inner = `
-      <div class="row note-card ${it.font === 'mono' ? 'mono' : ''}" data-open="${it.id}" tabindex="0">
+      <div class="row note-card ${it.font === 'mono' ? 'mono' : ''} ${imp ? 'is-important' : ''}" data-open="${it.id}" tabindex="0">
+        ${coverHtml(it.body)}
         <div class="row-body">
-          <div class="row-title">${escapeHtml(it.title || 'Без названия')}</div>
-          ${desc ? `<div class="row-desc clamp-4">${escapeHtml(desc)}</div>` : ''}
+          <div class="row-title">${imp ? '<i class="imp-glow" title="Важная"></i>' : ''}${escapeHtml(it.title || 'Без названия')}</div>
+          ${lines ? `<div class="note-lines">${lines}</div>` : ''}
           <div class="row-meta"><span class="meta-plain">${escapeHtml(fmtHuman(it.updatedAt))}</span></div>
         </div>
         <button class="row-del" data-del="${it.id}" title="В корзину" aria-label="В корзину">${svgIcon('trash', 16)}</button>
@@ -780,14 +923,29 @@
       });
     });
 
+    if (listSel) scope.classList.add('selecting'); else scope.classList.remove('selecting');
     scope.querySelectorAll('[data-open]').forEach((el) => {
+      // Долгое нажатие (телефон) — включает выбор.
+      let lp = null;
+      el.addEventListener('touchstart', () => {
+        clearTimeout(lp);
+        lp = setTimeout(() => {
+          lp = 'fired';
+          if (navigator.vibrate) navigator.vibrate(12);
+          if (!listSel) setListSelect(true, el.dataset.open); else toggleSelected(el.dataset.open, el);
+        }, 480);
+      }, { passive: true });
+      ['touchmove', 'touchend', 'touchcancel'].forEach((ev) => el.addEventListener(ev, () => { if (lp !== 'fired') clearTimeout(lp); }, { passive: true }));
       const open = () => {
+        if (lp === 'fired') { lp = null; return; }
+        if (listSel) { toggleSelected(el.dataset.open, el); return; }
         const sw = el.closest('.swipe-item');
         if (sw && sw.classList.contains('open')) { closeSwipe(sw); return; }
         const it = state.items.find((x) => x.id === el.dataset.open);
         if (it) openEditor(it);
       };
-      el.addEventListener('click', (e) => { if (!e.target.closest('button')) open(); });
+      el.addEventListener('click', (e) => { if (!e.target.closest('button') || (listSel && !e.target.closest('[data-toggle]'))) open(); });
+      el.addEventListener('contextmenu', (e) => { if (lp === 'fired') e.preventDefault(); });
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) open(); });
     });
 
@@ -797,6 +955,8 @@
 
     const more = $('showDoneSearch');
     if (more) more.addEventListener('click', () => openSearch('done'));
+    const selBtn = $('selectBtn');
+    if (selBtn) selBtn.addEventListener('click', () => setListSelect(!listSel));
 
     bindSwipe(scope);
   }
@@ -812,6 +972,7 @@
   }
 
   function bindSwipe(scope) {
+    if (listSel) return;
     scope.querySelectorAll('.swipe-item').forEach((el) => {
       const content = el.querySelector('.row');
       let startX = null, startY = null, dragging = false, baseX = 0, lastX = 0;
@@ -1032,7 +1193,10 @@
         break;
       }
       case 'table': insertBlock('| Столбец 1 | Столбец 2 |\n| --- | --- |\n| | |', 2, 9); break;
-      case 'image': insertBlock('![описание](https://)', 13, 8); break;
+      case 'image':
+        if (window.Media) { Media.pick(ta); break; }
+        insertBlock('![описание](https://)', 13, 8);
+        break;
       case 'chart': insertBlock('```chart\n3, 7, 4, 9, 6\n```', 9, 13); break;
     }
   }
@@ -1128,7 +1292,11 @@
     state.editingType = type === 'note' ? 'note' : 'task';
     document.querySelectorAll('#editorTypeSwitch button').forEach((b) => b.classList.toggle('active', b.dataset.type === state.editingType));
     moveIndicator($('editorTypeSwitch'));
-    $('taskMeta').hidden = state.editingType !== 'task';
+    const isTask = state.editingType === 'task';
+    $('taskMeta').hidden = false;
+    $('deadlinePill').hidden = !isTask;
+    $('doneToggle').hidden = !isTask;
+    if (!isTask) $('deadlineClear').hidden = true; else updateDeadlineLabel();
     editor.bodyEl.placeholder = state.editingType === 'task'
       ? 'Детали задачи, подзадачи…'
       : 'Просто пиши. Markdown работает: **жирный**, - список, ```код```';
@@ -1168,11 +1336,14 @@
     const t = item || { title: '', body: '', importance: 'green', deadline: null, font: 'sans', done: false };
     editor.titleEl.value = t.title || '';
     editor.bodyEl.value = t.body || '';
+    editor.bodyEl.dataset.owner = state.editingId;
     editor.deadlineEl.value = toLocalInput(t.deadline);
     setImportance(t.importance);
     setDone(t.done);
     setFont(t.font);
-    setPreview(false);
+    // Заметки с таблицами, кодом, картинками или чек-листами открываются
+    // в режиме чтения — нажатие на текст переключает в правку.
+    setPreview(!!item && isRich(t.body));
 
     const ov = editor.overlay;
     ov.classList.add('open');
@@ -1239,7 +1410,7 @@
       item.done = snap.done;
     } else {
       item.deadline = null;
-      delete item.importance;
+      item.importance = snap.importance;
       item.done = false;
     }
 
@@ -1304,6 +1475,13 @@
     $('editorDone').addEventListener('click', closeEditor);
     $('editorClose').addEventListener('click', closeEditor);
     $('editorDelete').addEventListener('click', deleteFromEditor);
+    $('editorSide').addEventListener('click', async () => {
+      if (!window.Workspace) return;
+      const id = state.editingId;
+      await closeEditor();
+      if (!state.items.some((x) => x.id === id)) { toast('Сначала напиши что-нибудь — пустую запись не открыть рядом', 'info'); return; }
+      Workspace.open([id], { pick: true });
+    });
     editor.overlay.addEventListener('mousedown', (e) => { if (e.target === editor.overlay) closeEditor(); });
 
     document.querySelectorAll('#impSwitch button').forEach((b) => {
@@ -1311,11 +1489,13 @@
     });
     $('doneToggle').addEventListener('click', () => { setDone(!editor.done); updateDeadlineLabel(); scheduleSave(); });
     $('deadlineClear').addEventListener('click', () => { editor.deadlineEl.value = ''; updateDeadlineLabel(); scheduleSave(); });
-    ['input', 'change'].forEach((ev) => editor.deadlineEl.addEventListener(ev, () => { updateDeadlineLabel(); scheduleSave(); }));
-    // На десктопе клик по «пилюле» сразу открывает выбор даты.
-    $('deadlinePill').addEventListener('click', (e) => {
-      if (e.target === editor.deadlineEl) return;
-      try { editor.deadlineEl.showPicker(); } catch { editor.deadlineEl.focus(); }
+    $('deadlinePill').addEventListener('click', async () => {
+      if (!window.DatePicker) return;
+      const res = await DatePicker.open({ value: fromLocalInput(editor.deadlineEl.value), title: 'Дедлайн' });
+      if (!res) return;
+      editor.deadlineEl.value = res.clear ? '' : toLocalInput(res.ts);
+      updateDeadlineLabel();
+      scheduleSave();
     });
 
     editor.titleEl.addEventListener('input', scheduleSave);
@@ -1324,6 +1504,7 @@
     });
     editor.bodyEl.addEventListener('input', () => { updateCharCount(); autoGrow(); scheduleSave(); });
     editor.bodyEl.addEventListener('keydown', onBodyKeydown);
+    bindImageDrop(editor.bodyEl);
     window.addEventListener('resize', () => { if (editor.overlay.classList.contains('open')) { autoGrow(); moveIndicator($('editorTypeSwitch')); } });
 
     const tb = $('editorToolbar');
@@ -1333,13 +1514,38 @@
       const b = e.target.closest('.tool');
       if (b) applyTool(b.dataset.tool);
     });
-    editor.previewEl.addEventListener('dblclick', () => setPreview(false));
+    editor.previewEl.addEventListener('click', (e) => {
+      const li = e.target.closest('li[data-cb]');
+      if (li && (e.target.closest('.cb') || e.target === li)) {
+        editor.bodyEl.value = toggleChecklist(editor.bodyEl.value, +li.dataset.cb);
+        setPreview(true);
+        scheduleSave();
+        return;
+      }
+      if (e.target.closest('a, img, summary, iframe, details, .chart, table')) return;
+      if (window.getSelection && String(window.getSelection())) return; // выделяют текст — не мешаем
+      setPreview(false);
+      editor.bodyEl.focus();
+    });
 
     // Сохраняем при уходе со страницы / сворачивании приложения.
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
     window.addEventListener('beforeunload', (e) => {
       if (editor.dirty || pendingSync.size) { flushSave(); e.preventDefault(); e.returnValue = ''; }
     });
+  }
+
+  // Картинки из буфера обмена и перетаскиванием — сразу в текст.
+  function bindImageDrop(ta) {
+    ta.addEventListener('paste', (e) => {
+      const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\//.test(f.type));
+      if (files.length && window.Media) { e.preventDefault(); e.stopPropagation(); Media.insertImages(ta, files); }
+    }, true);
+    ta.addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
+    ta.addEventListener('drop', (e) => {
+      const files = [...(e.dataTransfer?.files || [])].filter((f) => /^image\//.test(f.type));
+      if (files.length && window.Media) { e.preventDefault(); e.stopPropagation(); Media.insertImages(ta, files); }
+    }, true);
   }
 
   function addForCurrentMode() {
@@ -1351,6 +1557,37 @@
       return;
     }
     openEditor(null, state.mode === 'notes' ? 'note' : 'task');
+  }
+
+  /* ====================== ПАНЕЛЬ ВЫБОРА (общая) ====================== */
+
+  function showSelectBar({ count, noun, actions, onAction, onClose }) {
+    let bar = $('selectBar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'selectBar';
+      bar.className = 'select-bar';
+      bar.setAttribute('role', 'toolbar');
+      document.body.appendChild(bar);
+      requestAnimationFrame(() => bar.classList.add('open'));
+    }
+    bar.innerHTML = `
+      <button class="icon-btn sm sb-close" data-sb="__close" aria-label="Выйти из выбора">${svgIcon('close', 16, 2.2)}</button>
+      <span class="sb-count"><b>${count}</b> ${plural(count, noun[0], noun[1], noun[2])}</span>
+      <div class="sb-actions">${actions.map((a) => `<button class="sb-btn ${a.danger ? 'danger' : ''}" data-sb="${a.id}" ${a.need && count < a.need ? 'disabled' : ''} ${a.max && count > a.max ? 'disabled' : ''}>${svgIcon(a.icon, 17)}<span>${a.label}</span></button>`).join('')}</div>`;
+    bar.querySelectorAll('[data-sb]').forEach((b) => b.addEventListener('click', () => {
+      if (b.dataset.sb === '__close') onClose(); else onAction(b.dataset.sb);
+    }));
+    document.body.classList.add('has-select-bar');
+  }
+
+  function hideSelectBar() {
+    const bar = $('selectBar');
+    document.body.classList.remove('has-select-bar');
+    if (!bar) return;
+    bar.classList.remove('open');
+    bar.id = '';
+    setTimeout(() => bar.remove(), 260);
   }
 
   /* ====================== ССЫЛКИ ====================== */
@@ -1398,6 +1635,7 @@
           ${svgIcon('search', 15)}
           <input id="linkSearch" type="search" placeholder="Найти" value="${escapeHtml(state.links.query)}" aria-label="Поиск по ссылкам">
         </label>
+        <button class="btn sm ${linkSel ? 'primary' : ''}" id="linkSelectBtn">${svgIcon('checklist', 15)}<span>${linkSel ? 'Готово' : 'Выбрать'}</span></button>
       </div>
       <div class="links-list" id="linksList"></div>`;
   }
@@ -1417,12 +1655,25 @@
     if (g && g !== '__none') chips.push(`<button class="chip chip-ghost" id="groupEdit" title="Переименовать или удалить группу">${svgIcon('more', 15, 2.4)}</button>`);
     box.innerHTML = chips.join('');
 
-    box.querySelectorAll('[data-group]').forEach((b) => b.addEventListener('click', () => {
-      state.links.group = b.dataset.group;
-      state.animateNext = true;
-      renderLinkGroups();
-      renderLinksList();
-    }));
+    box.querySelectorAll('[data-group]').forEach((b) => {
+      b.addEventListener('click', () => {
+        state.links.group = b.dataset.group;
+        state.animateNext = true;
+        renderLinkGroups();
+        renderLinksList();
+      });
+      // Сюда можно перетащить ссылку.
+      if (b.dataset.group === '') return;
+      b.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/nf-link')) { e.preventDefault(); b.classList.add('drop-ok'); } });
+      b.addEventListener('dragleave', () => b.classList.remove('drop-ok'));
+      b.addEventListener('drop', (e) => {
+        b.classList.remove('drop-ok');
+        const id = e.dataTransfer.getData('text/nf-link');
+        if (!id) return;
+        e.preventDefault();
+        moveLinks([id], b.dataset.group === '__none' ? '' : b.dataset.group);
+      });
+    });
     $('groupAdd').addEventListener('click', async () => {
       const name = await askText({ title: 'Новая группа', placeholder: 'Например, «Учёба»', actionText: 'Создать' });
       if (!name) return;
@@ -1455,6 +1706,99 @@
     renderLinksList();
   }
 
+  /* --- Выбор нескольких ссылок, перенос в группы --- */
+  let linkSel = null;   // Set выбранных id или null (режим выбора выключен)
+
+  async function pickGroup(title) {
+    const choice = await askChoice({
+      title,
+      choices: [
+        ...Links.groups.map((g) => ({ id: 'g:' + g.id, label: g.name })),
+        { id: 'g:', label: 'Без группы' },
+        { id: 'new', label: '+ Новая группа…' },
+      ],
+    });
+    if (!choice) return undefined;
+    if (choice === 'new') {
+      const name = await askText({ title: 'Новая группа', placeholder: 'Например, «Учёба»', actionText: 'Создать' });
+      if (!name || typeof name !== 'string') return undefined;
+      const g = Links.addGroup(name);
+      return g ? g.id : undefined;
+    }
+    return choice.slice(2);
+  }
+
+  function moveLinks(ids, group) {
+    const n = Links.updateMany(ids.map((id) => ({ id, patch: { group } })));
+    const gname = group ? (Links.groups.find((g) => g.id === group) || {}).name : 'Без группы';
+    toast(`${n} ${plural(n, 'ссылка перенесена', 'ссылки перенесены', 'ссылок перенесено')} → ${gname}`, 'ok', 2200);
+  }
+
+  function setLinkSelect(on) {
+    linkSel = on ? new Set() : null;
+    renderLinksList();
+    const b = $('linkSelectBtn');
+    if (b) { b.classList.toggle('primary', !!linkSel); b.querySelector('span').textContent = linkSel ? 'Готово' : 'Выбрать'; }
+    updateLinkSelectBar();
+  }
+
+  function updateLinkSelectBar() {
+    if (!linkSel) { hideSelectBar(); return; }
+    showSelectBar({
+      count: linkSel.size,
+      noun: ['ссылка', 'ссылки', 'ссылок'],
+      actions: [
+        { id: 'all', label: 'Все', icon: 'checklist' },
+        { id: 'move', label: 'В группу', icon: 'folder', need: 1 },
+        { id: 'copy', label: 'Копировать', icon: 'copy', need: 1 },
+        { id: 'del', label: 'Удалить', icon: 'trash', danger: true, need: 1 },
+      ],
+      onAction: async (act) => {
+        const ids = [...linkSel];
+        if (act === 'all') {
+          const all = filteredLinks().map((l) => l.id);
+          linkSel = linkSel.size === all.length ? new Set() : new Set(all);
+          renderLinksList(); updateLinkSelectBar();
+        } else if (act === 'move') {
+          const g = await pickGroup(`Перенести ${ids.length} ${plural(ids.length, 'ссылку', 'ссылки', 'ссылок')} в…`);
+          if (g === undefined) return;
+          moveLinks(ids, g);
+          setLinkSelect(false);
+        } else if (act === 'copy') {
+          const urls = Links.links.filter((l) => linkSel.has(l.id)).map((l) => l.url).join('\n');
+          try { await navigator.clipboard.writeText(urls); toast('Ссылки скопированы', 'ok', 1800); } catch { toast('Не удалось скопировать', 'err'); }
+        } else if (act === 'del') {
+          const removed = Links.removeMany(ids);
+          setLinkSelect(false);
+          toast(`Удалено: ${removed.length}`, 'info', 5000, { label: 'Отменить', onClick: () => Links.restoreMany(removed) });
+        }
+      },
+      onClose: () => setLinkSelect(false),
+    });
+  }
+
+  // Обложки и заголовки ссылок — автоматически (через /api/preview).
+  const previewPending = new Set();
+  let previewBatch = [];
+  let previewTimer = null;
+  function queuePreviews(links) {
+    if (!window.Media) return;
+    const week = 7 * 24 * 3600 * 1000;
+    links.filter((l) => !l.previewAt || (!l.image && Date.now() - l.previewAt > week)).slice(0, 24).forEach((l) => {
+      if (previewPending.has(l.id)) return;
+      previewPending.add(l.id);
+      Media.preview(l.url).then((d) => {
+        const patch = { previewAt: Date.now() };
+        if (d && d.image) patch.image = d.image;
+        if (d && d.title && !l.title) patch.title = d.title.slice(0, 160);
+        if (d && d.description) patch.desc = d.description.slice(0, 200);
+        previewBatch.push({ id: l.id, patch });
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(() => { const b = previewBatch; previewBatch = []; Links.updateMany(b); }, 600);
+      });
+    });
+  }
+
   function renderLinksList() {
     const list = $('linksList');
     if (!list) return;
@@ -1462,6 +1806,7 @@
     const animate = state.animateNext;
     state.animateNext = false;
     list.classList.toggle('animate', animate);
+    list.classList.toggle('selecting', !!linkSel);
     if (!links.length) {
       const empty = Links.links.length
         ? '<div class="empty small">Ничего не найдено</div>'
@@ -1470,36 +1815,69 @@
       return;
     }
     const groupName = (id) => (Links.groups.find((g) => g.id === id) || {}).name || '';
+    const canDrag = window.matchMedia && matchMedia('(pointer: fine)').matches;
     list.innerHTML = links.map((l, i) => {
       const title = l.title || l.domain || l.url;
       const sub = [l.title ? l.domain : '', shortPath(l.url)].filter(Boolean).join('');
       const gname = !state.links.group && l.group ? groupName(l.group) : '';
+      const sel = linkSel && linkSel.has(l.id);
       return `
-        <div class="link-card" style="--i:${Math.min(i, 14)};--h:${hueOf(l.domain || l.url)}" data-link="${escapeHtml(l.id)}">
+        <div class="link-card ${sel ? 'selected' : ''} ${l.image ? 'has-thumb' : ''}" style="--i:${Math.min(i, 14)};--h:${hueOf(l.domain || l.url)}" data-link="${escapeHtml(l.id)}" ${canDrag && !linkSel ? 'draggable="true"' : ''}>
+          ${linkSel ? `<span class="sel-box" aria-hidden="true">${svgIcon('check', 12, 3)}</span>` : ''}
           <a class="link-main" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">
-            <span class="link-avatar">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>
+            ${l.image
+              ? `<span class="link-thumb"><img src="${escapeHtml(l.image)}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`
+              : `<span class="link-avatar">${escapeHtml((l.domain || '?')[0].toUpperCase())}</span>`}
             <span class="link-text">
               <span class="link-title">${escapeHtml(title)}</span>
               <span class="link-sub">${escapeHtml(sub || l.url)}${gname ? ` <span class="link-group">${svgIcon('folder', 11)}${escapeHtml(gname)}</span>` : ''}</span>
             </span>
           </a>
           <div class="link-actions">
+            <button class="icon-btn sm" data-move title="Переместить в группу" aria-label="Переместить в группу">${svgIcon('folder', 16)}</button>
             <button class="icon-btn sm" data-copy title="Копировать" aria-label="Копировать ссылку">${svgIcon('copy', 16)}</button>
             <button class="icon-btn sm" data-edit title="Изменить" aria-label="Изменить ссылку">${svgIcon('more', 18, 2.4)}</button>
           </div>
         </div>`;
     }).join('');
 
+    list.querySelectorAll('img').forEach((img) => img.addEventListener('error', () => {
+      const card = img.closest('.link-card');
+      img.closest('.link-thumb').replaceWith(Object.assign(document.createElement('span'), { className: 'link-avatar', textContent: (card.querySelector('.link-title').textContent || '?')[0].toUpperCase() }));
+    }, { once: true }));
+
     list.querySelectorAll('.link-card').forEach((card) => {
       const id = card.dataset.link;
-      card.querySelector('[data-copy]').addEventListener('click', async () => {
+      card.addEventListener('click', (e) => {
+        if (!linkSel) return;
+        e.preventDefault();
+        if (linkSel.has(id)) linkSel.delete(id); else linkSel.add(id);
+        card.classList.toggle('selected', linkSel.has(id));
+        updateLinkSelectBar();
+      });
+      card.querySelector('[data-copy]').addEventListener('click', async (e) => {
+        e.stopPropagation();
         const l = Links.links.find((x) => x.id === id);
         if (!l) return;
         try { await navigator.clipboard.writeText(l.url); toast('Ссылка скопирована', 'ok', 1800); }
         catch { toast('Не удалось скопировать', 'err'); }
       });
-      card.querySelector('[data-edit]').addEventListener('click', () => openLinkEditor(id));
+      card.querySelector('[data-move]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const g = await pickGroup('Переместить в группу');
+        if (g !== undefined) moveLinks([id], g);
+      });
+      card.querySelector('[data-edit]').addEventListener('click', (e) => { e.stopPropagation(); openLinkEditor(id); });
+      // Перетаскивание на группу (компьютер).
+      card.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/nf-link', id);
+        e.dataTransfer.effectAllowed = 'move';
+        card.classList.add('dragging');
+        document.body.classList.add('dragging-link');
+      });
+      card.addEventListener('dragend', () => { card.classList.remove('dragging'); document.body.classList.remove('dragging-link'); });
     });
+    queuePreviews(links);
   }
 
   function bindLinksView() {
@@ -1527,6 +1905,8 @@
       }, 0);
     });
     $('linkSearch').addEventListener('input', (e) => { state.links.query = e.target.value; renderLinksList(); });
+    $('linkSelectBtn').addEventListener('click', () => setLinkSelect(!linkSel));
+    if (linkSel) updateLinkSelectBar();
   }
 
   function updateLinksSub() {
@@ -2112,10 +2492,24 @@
 
   /* ====================== ПРОЧЕЕ ====================== */
 
+  // Блокировка прокрутки фона под окнами. На iPhone overflow:hidden не
+  // помогает — фиксируем body и возвращаем позицию прокрутки при закрытии.
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   function bindScrollLock() {
+    let locked = false, savedY = 0;
     const update = () => {
-      const anyOpen = !!document.querySelector('.modal-overlay.open');
+      const anyOpen = !!document.querySelector('.modal-overlay.open, .annot');
       document.documentElement.classList.toggle('no-scroll', anyOpen);
+      if (!isIOS || anyOpen === locked) return;
+      locked = anyOpen;
+      const b = document.body.style;
+      if (anyOpen) {
+        savedY = window.scrollY;
+        b.position = 'fixed'; b.top = `-${savedY}px`; b.left = '0'; b.right = '0';
+      } else {
+        b.position = ''; b.top = ''; b.left = ''; b.right = '';
+        window.scrollTo(0, savedY);
+      }
     };
     new MutationObserver(update).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'], childList: true });
     update();
@@ -2129,7 +2523,12 @@
     const set = () => {
       root.setProperty('--vvh', vv.height + 'px');
       root.setProperty('--vvt', vv.offsetTop + 'px');
+      // Открыта экранная клавиатура → панель форматирования прилипает к ней.
+      const kb = window.innerHeight - vv.height > 140 && /TEXTAREA|INPUT/.test((document.activeElement || {}).tagName || '');
+      document.documentElement.classList.toggle('kb-open', kb);
     };
+    document.addEventListener('focusin', () => setTimeout(set, 50));
+    document.addEventListener('focusout', () => setTimeout(set, 120));
     vv.addEventListener('resize', set);
     vv.addEventListener('scroll', set);
     set();
@@ -2185,9 +2584,36 @@
     });
   }
 
+  // Service worker: офлайн-режим + аккуратное обновление по кнопке.
   async function registerSW() {
     if (!('serviceWorker' in navigator)) return;
-    try { await navigator.serviceWorker.register('/service-worker.js'); } catch { /* ignore */ }
+    let reg;
+    try { reg = await navigator.serviceWorker.register('/service-worker.js'); } catch { return; }
+    if (!reg) return;
+    const offer = (worker) => {
+      if (!worker || !navigator.serviceWorker.controller) return;
+      toast('Доступна новая версия NodeNote', 'info', 15000, {
+        label: 'Обновить',
+        onClick: async () => { await flushSave(); worker.postMessage('SKIP_WAITING'); },
+      });
+    };
+    if (reg.waiting) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      if (w) w.addEventListener('statechange', () => { if (w.state === 'installed') offer(w); });
+    });
+    let reloading = false;
+    // Перезагружаемся только при обновлении: при самой первой установке
+    // worker тоже берёт управление (clients.claim), но перезагрузка не нужна.
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading || !hadController) return;
+      reloading = true;
+      location.reload();
+    });
+    // Проверяем обновления при возвращении в приложение и раз в час.
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    setInterval(() => reg.update().catch(() => {}), 3600 * 1000);
   }
 
   /* ====================== СТАРТ ====================== */
@@ -2270,7 +2696,10 @@
     setInterval(() => { if (state.mode === 'tasks' && !topOverlay() && Auth.isSignedIn()) render(); }, 60000);
 
     // Ярлыки PWA: /?action=new-task или /?action=new-note
-    const action = new URLSearchParams(location.search).get('action');
+    const params = new URLSearchParams(location.search);
+    const action = params.get('action');
+    if (params.get('mode') && MODES.includes(params.get('mode'))) setMode(params.get('mode'));
+    if (params.has('action') || params.has('mode') || params.has('source')) history.replaceState(history.state, '', location.pathname + location.hash);
     if (Auth.isSignedIn()) {
       if (action === 'new-task') openEditor(null, 'task');
       else if (action === 'new-note') openEditor(null, 'note');
@@ -2280,9 +2709,13 @@
   // Общие функции для модуля проектов (projects.js).
   window.NF = {
     $, svgIcon, ICONS, escapeHtml, uid, plural, fmtTime, fmtHuman, startOfDay, pad2,
-    renderBody, plainPreview, highlightCode, renderTable,
+    renderBody, plainPreview, previewLines, toggleChecklist, isRich, highlightCode, renderTable, bindImageDrop,
+    insertText(ta, text) { fmtTA = ta; insertBlock(text); },
     toast, askConfirm, askText, askChoice, openOverlay, closeOverlay, closeHooks, topOverlay,
-    toolbarHtml, applyFormat, onBodyKeydown, setMode, moveIndicator,
+    toolbarHtml, applyFormat, onBodyKeydown, setMode, moveIndicator, showSelectBar, hideSelectBar,
+    openEditor: (it) => openEditor(it),
+    // Сохранить запись (для режима «Рядом»): true — сохранено на сервере.
+    saveItem: (item) => persist(item).then(() => { if (window.Links) Links.ingestFromItem(item); return true; }).catch(() => false),
     render: () => render(),
     get mode() { return state.mode; },
     get items() { return state.items; },

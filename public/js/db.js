@@ -1,4 +1,4 @@
-// NodeFlow — слой данных поверх таблицы public.items в Supabase.
+// NodeNote — слой данных поверх таблицы public.items в Supabase.
 // Каждый запрос выполняется от имени вошедшего пользователя (через Auth.client),
 // доступ к чужим записям исключён политиками RLS на стороне базы —
 // клиент не должен на это полагаться, но и обходить эту защиту тут нечем.
@@ -63,10 +63,9 @@
             createdAt: toMs(row.created_at),
             updatedAt: toMs(row.updated_at),
         };
-        if (row.type === 'task') {
-            item.importance = row.importance || 'green';
-            item.deadline = toMs(row.deadline);
-        }
+        // Важность есть и у задач, и у заметок.
+        item.importance = row.importance === 'red' ? 'red' : 'green';
+        if (row.type === 'task') item.deadline = toMs(row.deadline);
         if (row.deleted_at) item.deletedAt = toMs(row.deleted_at);
         return item;
     }
@@ -75,16 +74,17 @@
     // в виде data:-URL. Чтобы не тянуть мегабайты при каждом запуске, для них
     // загружаются только метаданные, а содержимое — по запросу (fileData).
     const FILE_CAT = '__nf_file';
+    const IMG_CAT = '__nf_img';   // картинки, вставленные в текст заметок/блоков
     const META_COLS = 'id,user_id,type,title,category,tags,references_ids,importance,deadline,done,deleted,deleted_at,draft,font,created_at,updated_at';
 
     async function allItems() {
         const userId = currentUserId();
         const [main, files] = await Promise.all([
             client().from(TABLE).select('*').eq('user_id', userId)
-                .or(`category.is.null,category.neq.${FILE_CAT}`)
+                .or(`category.is.null,category.not.in.(${FILE_CAT},${IMG_CAT})`)
                 .order('updated_at', { ascending: false }),
             client().from(TABLE).select(META_COLS).eq('user_id', userId)
-                .eq('category', FILE_CAT),
+                .in('category', [FILE_CAT, IMG_CAT]),
         ]);
         if (main.error) throw main.error;
         if (files.error) throw files.error;

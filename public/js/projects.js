@@ -1,4 +1,4 @@
-// NodeFlow — раздел «Проекты».
+// NodeNote — раздел «Проекты».
 // Проект = описание + дерево мыслей (блоки со связями родитель → дети) +
 // журнал записей + файлы любых типов. Из проекта собирается печатный отчёт
 // со статистикой работы.
@@ -1543,12 +1543,13 @@
     $('recTitle').value = o.title || '';
     $('recTitle').placeholder = isBlock ? 'Название блока' : 'Заголовок (необязательно)';
     $('recBody').value = isBlock ? o.content : o.text;
+    $('recBody').dataset.owner = o.id;
     $('recBody').placeholder = isBlock
       ? 'Опиши блок: задачи, идеи, решения. Работают списки, таблицы, ```код```, ```html …```'
       : 'Текст записи…';
     $('recKidsSec').hidden = !isBlock;
     $('recLinksSec').hidden = !isBlock;
-    setRecPreview(false);
+    setRecPreview(!!NF.isRich($('recBody').value));
     renderRecMeta();
     renderCrumbs();
     renderRecFiles();
@@ -1799,12 +1800,26 @@
     $('recTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('recBody').focus(); } });
     $('recBody').addEventListener('input', () => { changed(); updateRecCount(); recGrow(); });
     $('recBody').addEventListener('keydown', NF.onBodyKeydown);
+    // Картинки из буфера/перетаскиванием — прямо в текст; прочие файлы — во вложения.
+    NF.bindImageDrop($('recBody'));
     $('recBody').addEventListener('paste', (e) => {
-      const files = [...(e.clipboardData?.files || [])];
+      const files = [...(e.clipboardData?.files || [])].filter((f) => !/^image\//.test(f.type));
       const o = recObj();
       if (files.length && o) { e.preventDefault(); addFiles(files, { p: o.p, owner: o.id }); }
     });
-    $('recPreview').addEventListener('dblclick', () => setRecPreview(false));
+    $('recPreview').addEventListener('click', (e) => {
+      const li = e.target.closest('li[data-cb]');
+      if (li) {
+        $('recBody').value = NF.toggleChecklist($('recBody').value, +li.dataset.cb);
+        changed();
+        setRecPreview(true);
+        return;
+      }
+      if (e.target.closest('a, img, summary, iframe, details, .chart, table')) return;
+      if (String(window.getSelection && window.getSelection())) return;
+      setRecPreview(false);
+      $('recBody').focus();
+    });
     $('recClose').addEventListener('click', closeRec);
     $('recDone').addEventListener('click', closeRec);
     $('recDelete').addEventListener('click', deleteRec);

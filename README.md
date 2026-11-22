@@ -1,4 +1,4 @@
-# NodeFlow
+# NodeNote
 
 A fast, minimal web app for tasks, notes, links and projects, built with a focus on clean UX and data privacy.
 
@@ -10,12 +10,20 @@ Live: https://note-ai-henna.vercel.app
 
 - Autosave without a Save button: changes are stored a moment after typing, on window close and when the app goes to the background. Offline edits are queued and synced when the connection returns
 - Tasks with deadlines and priority; only the latest completed tasks stay in the list, the rest are available through search
+- Notes with important / regular priority; important notes are pinned to the top and highlighted
+- Readable cards: list structure, checklists and numbering are kept in previews; the first image becomes the card cover
+- Reading mode: notes with tables, code, charts, images or checklists open rendered; checklist items can be ticked right in the view
+- Images without links: insert from the device, camera, clipboard or drag-and-drop, or pick one automatically from Wikipedia / Wikimedia Commons. Images are stored inside the app and referenced as `![caption](nf:id)`
+- Work with several items at once: multi-select (long press on phones) with bulk priority, done and delete, and a side-by-side mode for 2–3 notes or tasks (columns on desktop, tabs on phones)
+- Custom deadline picker: month grid, quick presets (tonight, tomorrow morning, next week…) and time chips
 - Markdown editor: headings, emphasis, lists, checklists, quotes, highlighted code, links, tables, images and charts. Enter continues numbered lists, preview with one click
 - Links: paste into a single field, group, search and copy in one tap. Links found in notes are collected automatically (can be disabled or filtered per site)
+- Link previews: cover image and title are fetched automatically (`/api/preview`, signed-in users only, protected against requests to private networks)
+- Multi-select for links with bulk move, copy and delete; quick move via the folder button or drag-and-drop onto a group
 - Trash with 14-day recovery and instant undo
 - Dark, light and system themes with six accent colours
 - Responsive layout: bottom tab bar, sheets and a keyboard-aware full-screen editor on phones; dialogs and shortcuts (`Ctrl+K`, `Ctrl+N`, `/`, `Esc`) on desktop
-- Installable PWA with an offline app shell
+- Installable PWA: PNG and maskable icons, offline app shell, update prompt instead of stale caches, keyboard-aware formatting bar on phones
 
 **Projects**
 
@@ -67,6 +75,22 @@ Live: https://note-ai-henna.vercel.app
 
 A surrounding ```` ```json ```` fence from an AI response is accepted. Exports include a `files` list with file names only. When importing into an existing project the tree can be replaced, extended, or imported as a new project; repeated imports do not duplicate journal entries.
 
+## Installing the app
+
+- **iPhone / iPad:** open the site in Safari → Share → *Add to Home Screen*.
+- **Android:** Chrome → menu → *Install app* (or the install banner).
+- **Desktop:** Chrome / Edge → install icon in the address bar.
+
+New versions are picked up automatically; when an update is ready the app shows an *Update* button.
+
+### Publishing to Google Play
+
+The PWA meets the requirements for a Trusted Web Activity (manifest with `id`, 192/512 PNG icons, maskable icons, service worker, HTTPS):
+
+1. Generate an Android project with [PWABuilder](https://www.pwabuilder.com) (*Package for stores → Android*) or [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap): `bubblewrap init --manifest https://<your-domain>/manifest.json`.
+2. Publish the generated `assetlinks.json` at `https://<your-domain>/.well-known/assetlinks.json` (put it into `public/.well-known/`) so the app opens without the browser bar.
+3. Upload the signed `.aab` to the Google Play Console.
+
 ## Running locally
 
 ```bash
@@ -77,7 +101,9 @@ npm start               # http://localhost:5173
 ## Architecture
 
 - Frontend: vanilla JavaScript without a build step, CSS custom properties for theming. PDF, Word and Excel libraries live in `public/vendor` and load on demand
-- Backend: a dependency-free Node.js server (`server.js`) that serves the app and its runtime config
+- Backend: a dependency-free Node.js server (`server.js`) that serves the app and its runtime config with ETag-based caching
+- Link previews: `lib/preview.js`, used by `server.js` and by the Vercel function `api/preview.js` (needs `SUPABASE_URL` and `SUPABASE_ANON_KEY` in the environment)
+- All third-party libraries (Supabase, Prism, pdf.js, mammoth, SheetJS) are vendored in `public/vendor`, so the app does not depend on a CDN
 - Data: Supabase with Google sign-in and a single `items` table protected by Row Level Security
 
 ## License

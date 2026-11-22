@@ -1,4 +1,4 @@
-// NodeFlow — аутентификация через Supabase OAuth (Google).
+// NodeNote — аутентификация через Supabase OAuth (Google).
 // Никаких client id: браузер уходит на Google и возвращается на redirectTo,
 // сессию подхватывает Supabase SDK.
 (function () {

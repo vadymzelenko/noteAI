@@ -1,4 +1,4 @@
-// NodeFlow — коллекция ссылок (закладки).
+// NodeNote — коллекция ссылок (закладки).
 // Ссылки добавляются вручную или автоматически собираются из текста заметок
 // и задач. Хранятся в localStorage и, если пользователь вошёл, сами
 // синхронизируются в Supabase (служебная запись в таблице items).
@@ -121,6 +121,31 @@
         const l = state.links.find((x) => x.id === id);
         if (!l) return;
         Object.assign(l, patch);
+        save();
+    }
+
+    // Пакетное изменение (одно сохранение и одна перерисовка).
+    function updateMany(patches) {
+        let n = 0;
+        patches.forEach(({ id, patch }) => {
+            const l = state.links.find((x) => x.id === id);
+            if (l) { Object.assign(l, patch); n++; }
+        });
+        if (n) save();
+        return n;
+    }
+
+    function removeMany(ids) {
+        const set = new Set(ids);
+        const removed = state.links.filter((x) => set.has(x.id));
+        state.links = state.links.filter((x) => !set.has(x.id));
+        save();
+        return removed;
+    }
+
+    function restoreMany(list) {
+        const have = new Set(state.links.map((x) => x.id));
+        (list || []).forEach((l) => { if (!have.has(l.id)) state.links.push(l); });
         save();
     }
 
@@ -250,7 +275,7 @@
         get links() { return state.links.slice(); },
         get groups() { return state.groups.slice(); },
         get blocklist() { return state.blocklist.slice(); },
-        addLink, updateLink, removeLink, restoreLink,
+        addLink, updateLink, removeLink, restoreLink, updateMany, removeMany, restoreMany,
         addGroup, renameGroup, removeGroup,
         addBlock, removeBlock,
         ingest, ingestFromItem, isAutoCollect, setAutoCollect,
