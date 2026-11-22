@@ -895,9 +895,22 @@
           ${desc && it.title ? `<div class="note-lines task-lines">${desc}</div>` : ''}
           ${meta.length ? `<div class="row-meta">${meta.join('')}</div>` : ''}
         </div>
+        ${taskThumb(it)}
         <button class="row-del" data-del="${it.id}" title="В корзину" aria-label="В корзину">${svgIcon('trash', 16)}</button>
       </div>`;
     return swipeWrap(it.id, i, inner);
+  }
+
+  // Миниатюра задачи справа: картинка из текста или узор.
+  function taskThumb(it) {
+    const img = window.Media && Media.firstImage(it.body);
+    if (img) {
+      return `<span class="task-thumb">${img.id
+        ? `<img data-nfimg="${escapeHtml(img.id)}" alt="">`
+        : `<img src="${escapeHtml(img.url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`}</span>`;
+    }
+    if (!window.Patterns || !pref('covers', true)) return '';
+    return `<span class="task-thumb">${Patterns.html(it.id, { style: pref('coverStyle', 'auto'), w: 120, h: 120 })}</span>`;
   }
 
   function coverHtml(body, it) {

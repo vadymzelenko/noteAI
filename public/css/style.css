@@ -2984,3 +2984,77 @@ img, svg { -webkit-user-drag: none; }
   .opt-chips { justify-content: flex-start; }
 }
 mark { padding: 0; border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+
+/* ============================================================
+   v5: РОВНАЯ СЕТКА ЗАМЕТОК + МИНИАТЮРЫ ЗАДАЧ
+   Все карточки одного размера: обложка фиксированной высоты, заголовок
+   до 2 строк, текст плавно обрезается, дата всегда внизу.
+   ============================================================ */
+.notes-grid.view-grid {
+  display: grid;
+  columns: auto;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-auto-rows: 264px;
+  gap: 12px;
+}
+.notes-grid.view-grid .swipe-item { display: flex; margin: 0; min-height: 0; }
+.notes-grid.view-grid .note-card { flex: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.notes-grid.view-grid .note-cover,
+.notes-grid.view-grid .note-cover.is-pattern,
+.notes-grid.view-grid .note-cover:not(.is-pattern) { flex: none; height: 84px; }
+.notes-grid.view-grid .note-card .row-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 12px; }
+.notes-grid.view-grid .note-card .row-title {
+  flex: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 15.5px;
+  line-height: 1.35;
+}
+.notes-grid.view-grid .note-lines {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 6px;
+  -webkit-mask-image: linear-gradient(#000 70%, transparent);
+  mask-image: linear-gradient(#000 70%, transparent);
+}
+.notes-grid.view-grid .note-card .row-meta { flex: none; margin-top: 8px; }
+/* Без обложки — тексту больше места, высота та же */
+.notes-grid.view-grid .note-card:not(:has(.note-cover)) .row-body { padding-top: 16px; }
+
+@media (max-width: 720px) {
+  .notes-grid.view-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 216px; gap: 10px; }
+  .notes-grid.view-grid .note-cover,
+  .notes-grid.view-grid .note-cover.is-pattern,
+  .notes-grid.view-grid .note-cover:not(.is-pattern) { height: 60px; }
+  .notes-grid.view-grid .note-card .row-body { padding: 10px 12px; }
+  .notes-grid.view-grid .note-card .row-title { font-size: 14px; }
+  .notes-grid.view-grid .note-lines { font-size: 12.5px; margin-top: 4px; gap: 1px; }
+  .notes-grid.view-grid .note-card .row-meta { margin-top: 4px; }
+  .notes-grid.view-grid .meta-plain { font-size: 11px; }
+  .notes-grid.view-grid .row-del { display: none; }
+}
+
+/* Миниатюры задач */
+.task-thumb {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  margin: -2px 0 -2px 4px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  align-self: center;
+}
+.task-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.task-row.done .task-thumb { opacity: .45; filter: grayscale(.6); }
+[data-density='compact'] .task-thumb { width: 36px; height: 36px; border-radius: 8px; }
+[data-density='cozy'] .task-thumb { width: 54px; height: 54px; border-radius: 12px; }
+.task-row .row-del { align-self: center; margin: 0 -4px 0 0; }
+@media (max-width: 720px) { .task-thumb { width: 40px; height: 40px; } }
+.task-row .row-body { min-width: 0; }
+.task-row .row-meta { flex-wrap: wrap; min-width: 0; }
+.task-row .meta-pill { max-width: 100%; min-width: 0; white-space: normal; height: auto; line-height: 1.3; padding-top: 3px; padding-bottom: 3px; }
