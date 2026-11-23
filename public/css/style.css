@@ -3095,3 +3095,95 @@ mark { padding: 0; border-radius: 3px; box-decoration-break: clone; -webkit-box-
   .task-row { --thumb-w: 34%; padding-right: 24%; }
   .task-row .task-thumb { width: var(--thumb-w); height: auto; }
 }
+
+/* ============================================================
+   v7: ГЛОБАЛЬНАЯ ПРАВКА ВЁРСТКИ
+   ============================================================ */
+
+/* Превью заметок: строки не сжимаются флексом и не наезжают друг на друга */
+.note-lines > * { flex: none; min-height: 0; }
+.note-lines .pl { line-height: 1.5; }
+.note-lines .pl-code { line-height: 1.6; }
+
+/* Режим выбора — без сдвигов, чекбокс внутри карточки */
+.selecting .swipe-item, .links-list.selecting .link-card { margin-left: 0; }
+.sel-box {
+  left: 10px; top: 10px; margin-top: 0;
+  width: 24px; height: 24px; border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+.links-list.selecting .link-card { position: relative; padding-left: 40px; }
+.links-list.selecting .link-card .sel-box { left: 10px; top: 50%; margin-top: -12px; box-shadow: none; }
+.check.sel-check { border-radius: 7px; pointer-events: none; }
+.swipe-item.selected .check.sel-check { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.swipe-item.selected .sel-box svg, .link-card.selected .sel-box svg { color: var(--accent-fg); }
+.swipe-item.selected .row, .link-card.selected {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.selecting .swipe-item:not(.selected) .row { opacity: .82; }
+.selecting .row { cursor: pointer; }
+.selecting .row:active { transform: scale(.985); }
+
+/* Полоса-обложка задачи сохраняет место при любой плотности */
+html .row.task-row { padding-right: calc(var(--thumb-w) * .72); }
+@media (max-width: 720px) { html .row.task-row { padding-right: 24%; } }
+html .row.task-row:not(:has(.task-thumb)) { padding-right: 14px; }
+
+/* Мобильные листы: следуют за видимой областью (клавиатура не перекрывает) */
+@media (max-width: 720px) {
+  .modal-overlay { top: var(--vvt, 0px); bottom: auto; height: var(--vvh, 100dvh); }
+  html.kb-open .modal-body { padding-bottom: 16px; }
+
+  /* Поиск — на весь экран, строка ввода сверху */
+  .search-overlay { align-items: stretch; padding: 0; }
+  .search-overlay .search-modal {
+    height: 100%; max-height: none;
+    border-radius: 0; border: 0;
+    padding-top: var(--safe-t);
+  }
+  .search-overlay .search-modal::before { display: none; }
+  .search-head { padding: 8px 6px 4px 16px; }
+  .search-head input { font-size: 16px; }
+  .search-filters { padding: 0 10px 8px; }
+  .search-filters .seg-chips { overflow-x: auto; scrollbar-width: none; }
+  .search-filters .seg-chips::-webkit-scrollbar { display: none; }
+  .sf { flex: none; }
+}
+.swipe-item.selected .check.sel-check svg { stroke-dashoffset: 0; }
+
+/* Плотность не должна ломать карточки заметок: отступы только внутри */
+html .row.note-card { padding: 0; }
+html[data-density='compact'] .notes-grid.view-grid { gap: 8px; }
+html[data-density='cozy'] .notes-grid.view-grid { gap: 16px; }
+/* Крупный текст — карточки чуть выше, чтобы влезало */
+html[data-text-size='l'] .notes-grid.view-grid { grid-auto-rows: 288px; }
+html[data-text-size='xl'] .notes-grid.view-grid { grid-auto-rows: 312px; }
+html[data-text-size='s'] .notes-grid.view-grid { grid-auto-rows: 244px; }
+@media (max-width: 720px) {
+  html .row.task-row { --thumb-w: 34%; }
+  html[data-density='compact'] .row.task-row { --thumb-w: 28%; }
+  html[data-text-size='l'] .notes-grid.view-grid { grid-auto-rows: 236px; }
+  html[data-text-size='xl'] .notes-grid.view-grid { grid-auto-rows: 256px; }
+  html[data-text-size='s'] .notes-grid.view-grid { grid-auto-rows: 204px; }
+  html[data-text-size='l'] .notes-grid.view-grid .note-lines,
+  html[data-text-size='xl'] .notes-grid.view-grid .note-lines { font-size: 14px; }
+  html[data-text-size='l'] .notes-grid.view-grid .note-card .row-title,
+  html[data-text-size='xl'] .notes-grid.view-grid .note-card .row-title { font-size: 15.5px; }
+}
+/* Шапка редактора на узких экранах: всё помещается, статус — только точкой */
+.editor-head { min-width: 0; }
+.editor-head .save-state { min-width: 0; flex: 0 1 auto; overflow: hidden; }
+@media (max-width: 420px) {
+  .editor-head { gap: 6px; }
+  .editor-head .seg button { padding-left: 10px; padding-right: 10px; }
+  .editor-head .save-state span:last-child { display: none; }
+  .editor-head-actions { flex: none; }
+  .editor-head-actions .icon-btn { width: 36px; }
+}
+.selecting .row-del { display: none !important; }
+.selecting .swipe-item:not(.selected) .row.done .check.sel-check { background: transparent; border-color: var(--border-strong); }
+.selecting .swipe-item:not(.selected) .row.done .check.sel-check svg { stroke-dashoffset: 24; }
