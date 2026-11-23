@@ -871,7 +871,7 @@
   function swipeWrap(id, i, inner, extraCls = '') {
     return `
       <div class="swipe-item ${extraCls} ${listSel && listSel.has(id) ? 'selected' : ''}" data-id="${id}" style="--i:${Math.min(i, 14)}">
-        ${listSel ? `<span class="sel-box" aria-hidden="true">${svgIcon('check', 12, 3)}</span>` : ''}
+        ${listSel && !extraCls.includes('no-selbox') ? `<span class="sel-box" aria-hidden="true">${svgIcon('check', 12, 3)}</span>` : ''}
         <div class="swipe-actions"><button class="swipe-delete" data-swipe-delete aria-label="Удалить">${svgIcon('trash', 18)}</button></div>
         ${inner}
       </div>`;
@@ -887,9 +887,9 @@
     if (it.importance === 'red' && !it.done) meta.push('<span class="meta-pill red"><span class="dot red"></span>Важно</span>');
     const inner = `
       <div class="row task-row ${it.done ? 'done' : ''} imp-${it.importance}" data-open="${it.id}" tabindex="0">
-        <button class="check" data-toggle="${it.id}" aria-label="${it.done ? 'Вернуть в работу' : 'Отметить выполненной'}" aria-pressed="${it.done}">
+        ${listSel ? `<span class="check sel-check" aria-hidden="true">${svgIcon('check', 13, 3)}</span>` : `<button class="check" data-toggle="${it.id}" aria-label="${it.done ? 'Вернуть в работу' : 'Отметить выполненной'}" aria-pressed="${it.done}">
           ${svgIcon('check', 13, 3)}
-        </button>
+        </button>`}
         <div class="row-body">
           <div class="row-title"><span>${escapeHtml(it.title || plainPreview(it.body, 80) || 'Без названия')}</span></div>
           ${desc && it.title ? `<div class="note-lines task-lines">${desc}</div>` : ''}
@@ -898,7 +898,7 @@
         ${taskThumb(it)}
         <button class="row-del" data-del="${it.id}" title="В корзину" aria-label="В корзину">${svgIcon('trash', 16)}</button>
       </div>`;
-    return swipeWrap(it.id, i, inner);
+    return swipeWrap(it.id, i, inner, 'no-selbox');
   }
 
   // Миниатюра задачи справа: картинка из текста или узор.
